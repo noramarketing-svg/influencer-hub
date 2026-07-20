@@ -1,0 +1,327 @@
+{
+  "_description": "English Topic Classification Config - Based on Spanish 5-level pipeline logic",
+
+  "brands_3c_accessories": {
+    "anker": {
+      "labels": ["Power Bank", "Charger"],
+      "keywords": ["powerbank", "power bank", "charger", "cable", "charging", "nano", "gan", "prime"]
+    },
+    "ugreen": {
+      "labels": ["Docking Station", "Accessories", "Tracker", "NAS"],
+      "keywords": ["docking", "finetrack", "nas", "cable", "tracker", "keychain"]
+    },
+    "iniu": {
+      "labels": ["Power Bank"],
+      "keywords": ["powerbank", "power bank", "snapgo", "cougar"]
+    },
+    "cuktech": {
+      "labels": ["Power Bank"],
+      "keywords": ["powerbank", "power bank", "qi2", "magsafe"]
+    },
+    "belkin": {
+      "labels": ["Case", "Accessories"],
+      "keywords": ["case", "protector", "screen protector", "magsafe charger"]
+    },
+    "torras": {
+      "labels": ["Phone Case"],
+      "keywords": ["case", "protection", "kickstand"]
+    },
+    "spigen": {
+      "labels": ["Phone Case", "Screen Protector"],
+      "keywords": ["case", "screen protector", "tough armor", "liquid air"]
+    },
+    "nomad": {
+      "labels": ["Phone Case", "Charger"],
+      "keywords": ["case", "leather case", "charger", "stand"]
+    },
+    "mophie": {
+      "labels": ["Power Bank", "Charger"],
+      "keywords": ["powerbank", "power bank", "juice pack", "charger"]
+    },
+    "ravpower": {
+      "labels": ["Power Bank", "Charger"],
+      "keywords": ["powerbank", "power bank", "charger"]
+    },
+    "aukey": {
+      "labels": ["Power Bank", "Charger"],
+      "keywords": ["powerbank", "power bank", "charger"]
+    },
+    "satechi": {
+      "labels": ["Docking Station", "Charger"],
+      "keywords": ["docking", "hub", "charger", "stand"]
+    },
+    "benks": {
+      "labels": ["Phone Case", "Screen Protector"],
+      "keywords": ["case", "screen protector", "magclic"]
+    },
+    "casetify": {
+      "labels": ["Phone Case"],
+      "keywords": ["case", "phone case", "impact case"]
+    },
+    "dbrand": {
+      "labels": ["Phone Case", "Skin"],
+      "keywords": ["case", "skin", "grip case", "teardown"]
+    },
+    "peak design": {
+      "labels": ["Phone Case", "Accessories"],
+      "keywords": ["case", "everyday case", "mount", "tripod"]
+    },
+    "moft": {
+      "labels": ["Stand", "Accessories"],
+      "keywords": ["stand", "snap", "wallet stand"]
+    },
+    "pitaka": {
+      "labels": ["Phone Case", "Charger"],
+      "keywords": ["case", "aramid", "mag ez", "charger"]
+    },
+    "esr": {
+      "labels": ["Phone Case", "Charger"],
+      "keywords": ["case", "charger", "halolock", "kickstand"]
+    },
+    "dji": {
+      "labels": ["Drone", "Camera"],
+      "keywords": ["dji", "drone", "osmo", "ronin", "mic"]
+    }
+  },
+
+  "brands_other": {
+    "gopro": {
+      "labels": ["Action Camera"],
+      "keywords": ["gopro", "hero", "action camera", "underwater", "4k"]
+    },
+    "insta360": {
+      "labels": ["360 Camera", "Action Camera"],
+      "keywords": ["insta360", "360 camera", "flow", "x4", "go3"]
+    },
+    "ringconn": {
+      "labels": ["Smart Ring", "Wearable"],
+      "keywords": ["ringconn", "smart ring", "ring", "gen3"]
+    },
+    "cmf by nothing": {
+      "labels": ["Phone", "Accessories"],
+      "keywords": ["cmf", "cmf phone", "cmf buds", "cmf watch"]
+    },
+    "samsung": {
+      "labels": ["Phone"],
+      "keywords": ["galaxy", "fold", "flip", "z fold", "z flip", "ultra", "s25", "s26"]
+    },
+    "apple": {
+      "labels": ["Phone", "Ecosystem"],
+      "keywords": ["iphone", "ipad", "macbook", "ios", "macos", "vision pro", "dynamic island"]
+    },
+    "google": {
+      "labels": ["Phone", "AI"],
+      "keywords": ["pixel", "gemini", "google home", "nest"],
+      "match_as_brand_only_with": ["pixel", "nest", "google home", "google pixel"]
+    },
+    "oneplus": {
+      "labels": ["Phone"],
+      "keywords": ["oneplus", "nord", "open"]
+    },
+    "nothing": {
+      "labels": ["Phone"],
+      "keywords": ["nothing phone", "nothing ear", "cmf"]
+    },
+    "hoverair": {
+      "labels": ["Drone"],
+      "keywords": ["drone", "hoverair", "tracking drone", "x1"]
+    },
+    "tesla": {
+      "labels": ["EV", "Tech"],
+      "keywords": ["tesla", "cybertruck", "model y", "model 3", "fsd"]
+    },
+    "meta": {
+      "labels": ["AR/VR", "AI"],
+      "keywords": ["meta quest", "ray ban", "smart glasses", "llama"]
+    },
+    "openai": {
+      "labels": ["AI"],
+      "keywords": ["chatgpt", "gpt", "sora", "openai"]
+    },
+    "nvidia": {
+      "labels": ["GPU", "AI"],
+      "keywords": ["rtx", "geforce", "nvidia", "dlss"]
+    },
+    "amazon": {
+      "labels": ["E-commerce"],
+      "keywords": ["amazon", "alexa", "echo", "fire tv", "kindle"]
+    },
+    "fitbit": {
+      "labels": ["Wearable"],
+      "keywords": ["fitbit", "charge", "sense", "versa"]
+    },
+    "garmin": {
+      "labels": ["Wearable"],
+      "keywords": ["garmin", "fenix", "forerunner", "vivoactive"]
+    },
+    "sonos": {
+      "labels": ["Audio"],
+      "keywords": ["sonos", "era", "arc", "beam", "move"]
+    },
+    "bose": {
+      "labels": ["Audio"],
+      "keywords": ["bose", "quietcomfort", "soundlink"]
+    },
+    "sihoo": {
+      "labels": ["Ergonomic Chair"],
+      "keywords": ["chair", "ergonomic", "doro"]
+    },
+    "herman miller": {
+      "labels": ["Ergonomic Chair"],
+      "keywords": ["aeron", "embody", "chair", "ergonomic"]
+    },
+    "sony": {
+      "labels": ["Audio", "Camera", "Gaming"],
+      "keywords": ["sony", "playstation", "ps5", "wh-1000", "a7", "alpha"]
+    },
+    "xbox": {
+      "labels": ["Gaming"],
+      "keywords": ["xbox", "xbox series", "game pass"]
+    },
+    "nintendo": {
+      "labels": ["Gaming"],
+      "keywords": ["nintendo", "switch", "switch 2", "mario", "zelda"]
+    }
+  },
+
+  "apple_ecosystem_keywords": [
+    "airpods", "earpods", "airpods pro", "airpods max",
+    "iphone", "ipad", "macbook", "imac", "mac mini", "mac studio",
+    "apple watch", "homepod", "siri", "apple tv",
+    "guided access", "control center", "offline maps",
+    "apple ring", "apple smart ring", "magsafe",
+    "apple pencil", "facetime", "imessage", "airdrop", "icloud",
+    "ios", "ipados", "macos", "vision pro", "dynamic island",
+    "apple intelligence", "apple silicon", "app store",
+    "wwdc", "apple park", "apple event", "apple keynote",
+    "#apple", "#iphone", "#ios", "#macbook", "#airpods", "#siri"
+  ],
+
+  "explicit_sponsor_markers": [
+    "#ad", "#sponsored", "#partner", "#gifted",
+    "sponsored", "paid partnership", "affiliate link"
+  ],
+  "explicit_sponsor_markers_word_boundary": [
+    "ad"
+  ],
+
+  "review_signals": [
+    "tested", "testing", "i've been using", "i tried",
+    "unboxing", "my review", "my honest review", "my opinion",
+    "hands on", "first look", "what i think", "i've tested",
+    "after using", "i've had this", "been using this",
+    "check this out", "take a closer look", "let me show you",
+    "here's what i found", "worth buying", "is it worth"
+  ],
+
+  "news_signals": [
+    "launch", "launched", "announced", "announcement",
+    "just released", "is official", "official",
+    "rumor", "rumors", "leak", "leaked",
+    "breaking", "confirmed", "reports suggest",
+    "coming soon", "next gen", "next generation",
+    "just dropped", "is here", "finally here",
+    "new", "update", "updated", "upgrade",
+    "vs", "versus", "compared to", "comparison"
+  ],
+
+  "sponsor_signals": [
+    "link in bio", "comment link", "dm for link",
+    "discount code", "promo code", "use code",
+    "on sale", "get yours", "check the link",
+    "affiliate", "link below", "click the link",
+    "grab yours", "limited offer", "deal",
+    "save", "off", "% off", "coupon"
+  ],
+
+  "category_keywords": {
+    "Apple/iOS Ecosystem": [
+      "iphone", "ipad", "macbook", "mac", "ios", "macos",
+      "apple watch", "airpods", "vision pro", "ipados",
+      "siri", "icloud", "airdrop", "app store",
+      "apple intelligence", "dynamic island", "apple silicon",
+      "wwdc", "apple park", "apple event", "apple keynote",
+      "facetime", "imessage", "magsafe", "apple pencil",
+      "iphone 15", "iphone 16", "iphone 17", "iphone 18",
+      "ios 18", "ios 19", "ios 26", "ios 27",
+      "earpods", "airpods pro", "airpods max", "imac", "mac mini",
+      "homepod", "guided access", "control center", "offline maps",
+      "apple ring", "apple smart ring",
+      "#apple", "#iphone", "#ios", "#macbook", "#airpods", "#siri"
+    ],
+    "AI Tools & Tech Lifestyle": [
+      "chatgpt", "gpt", "openai", "gemini", "claude",
+      "perplexity", "cursor", "copilot", "midjourney",
+      "ai tool", "ai tools", "artificial intelligence",
+      "prompt", "ai can", "ai will", "ai is",
+      "machine learning", "llm", "generative ai",
+      "ai app", "ai powered", "ai generated",
+      "startup", "side project", "build in public",
+      "productivity", "automation", "workflow",
+      "ai content", "content with ai", "ai generated",
+      "chatgpt work", "claude fable", "higgsfield",
+      "#ai", "#chatgpt", "#gemini", "#aitools"
+    ],
+    "Tech News & Tutorials": [
+      "how to", "tutorial", "guide", "tips and tricks",
+      "tips", "trick", "hack", "secret",
+      "did you know", "you didn't know", "hidden feature",
+      "settings", "setup", "configure", "enable",
+      "step by step", "quick tip", "pro tip",
+      "whatsapp", "telegram", "discord", "spotify",
+      "netflix", "youtube", "chrome", "browser",
+      "android", "google", "microsoft", "windows",
+      "review", "comparison", "compared", "versus",
+      "world cup", "football", "soccer", "sports",
+      "vs", "speed test", "do not buy", "underrated",
+      "problem with", "setting off", "turn off", "privacy settings",
+      "#tech", "#techtok", "#tutorial", "#howto"
+    ]
+  },
+
+  "llm_config": {
+    "enabled": false,
+    "api_base": "",
+    "api_key_env": "LLM_API_KEY",
+    "model": "gpt-4o-mini",
+    "prompt_template": "You are a tech video title classifier. Classify the following English title into one of 5 categories: 3C Accessories Brand Sponsor/Review, Apple/iOS Ecosystem, Other Brand Product Review, Tech News/Tutorials, AI Tools & Tech Lifestyle. Return JSON: {\"category\": \"...\", \"keywords\": \"...\"}"
+  },
+
+  "promotion_patterns": {
+    "problem_solution": [
+      "the problem with", "the problem is",
+      "this solves", "the solution",
+      "i found a way", "game changer",
+      "life changing", "this changes everything"
+    ],
+    "feature_list": ["✔️", "✅", "☑️", "✗", "❌", "•"],
+    "purchase_intent": [
+      "link in bio", "link below", "check the link",
+      "get it here", "where to buy", "i bought",
+      "just ordered", "just got", "grab it",
+      "discount code", "promo code", "coupon code",
+      "use code", "affiliate link", "sponsored link",
+      "commission", "paid partnership"
+    ],
+    "personal_review": [
+      "i've been using", "my review",
+      "my honest review", "after testing",
+      "what i think", "is it worth buying",
+      "should you buy", "full review",
+      "hands on review", "unboxing and review"
+    ],
+    "recommendation_list": [
+      "best budget", "favorite", "favourite",
+      "recommend", "must have", "essential",
+      "gadgets you need", "products you need",
+      "worth every penny", "worth buying"
+    ]
+  },
+
+  "tutorial_patterns": [
+    "how to", "how i", "learn how", "tutorial",
+    "guide to", "guide for", "tips for", "tips to",
+    "tricks for", "trick for", "step by step",
+    "quick guide", "beginner guide", "ultimate guide"
+  ]
+}

@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>达人账号分析系统 v3.0</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7;color:#333;background:#f0f2f5;padding:20px}
+.container{max-width:1400px;margin:0 auto}
+h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
+.subtitle{color:#666;font-size:14px;margin-bottom:20px}
+
+/* Input Panel */
+.input-panel{background:#fff;border-radius:12px;padding:24px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.08)}
+.input-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.input-group{flex:1;min-width:200px}
+.input-group label{display:block;font-size:13px;font-weight:600;color:#64748b;margin-bottom:4px}
+.input-group input,.input-group select{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit}
+.input-group input:focus,.input-group select:focus{outline:none;border-color:#4472C4;box-shadow:0 0 0 3px rgba(68,114,196,0.15)}
+.btn{background:#4472C4;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#365899}
+.btn:disabled{opacity:0.6;cursor:not-allowed}
+.btn-secondary{background:#64748b}
+.btn-secondary:hover{background:#475569}
+.status{font-size:13px;color:#64748b;margin-top:8px;min-height:20px}
+.status.error{color:#dc2626}
+.status.ok{color:#059669}
+
+/* Stats */
+.stats{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.stat{background:#fff;border-radius:10px;padding:16px 24px;text-align:center;min-width:120px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.stat .num{font-size:28px;font-weight:700;color:#4472C4}
+.stat .label{font-size:12px;color:#64748b;margin-top:2px}
+
+/* Section */
+.section{background:#fff;border-radius:12px;padding:24px;margin-bottom:24px;box-shadow:0 2px 12px rgba(0,0,0,0.08)}
+.section h2{font-size:18px;color:#1a1a2e;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #e8ecf1}
+.section h3{font-size:15px;color:#334155;margin:16px 0 10px}
+
+/* Bar Chart */
+.bar-chart{display:flex;align-items:flex-end;gap:10px;height:200px;padding:20px 10px;background:#f8fafc;border-radius:8px;min-width:500px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:70px}
+.bar-fill{width:100%;border-radius:4px 4px 0 0;transition:all 0.3s;min-height:4px}
+.bar:hover .bar-fill{filter:brightness(0.9)}
+.bar-label{font-size:11px;color:#64748b;margin-top:6px;text-align:center;line-height:1.3;max-width:90px;word-break:break-all}
+.bar-value{font-size:12px;font-weight:700;color:#1a1a2e;margin-bottom:4px}
+
+/* Table */
+.video-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
+.video-table th{background:#1e293b;color:#fff;padding:10px 12px;text-align:left;font-weight:600;position:sticky;top:0}
+.video-table td{padding:10px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+.video-table tr:nth-child(even){background:#f8fafc}
+.video-table tr:hover{background:#e8f0fe}
+.cat-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+.video-link{color:#4472C4;text-decoration:none;font-size:12px}
+.video-link:hover{text-decoration:underline}
+
+/* Comment Part Cards */
+.comment-part{margin-bottom:24px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden}
+.comment-part-header{background:#f8fafc;padding:16px 20px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.comment-part-header h3{margin:0;font-size:16px}
+.comment-part-body{padding:20px}
+
+/* Video cards in comment part */
+.video-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.video-card{flex:1;min-width:220px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;cursor:pointer;transition:all 0.2s}
+.video-card:hover{border-color:#4472C4;box-shadow:0 2px 8px rgba(68,114,196,0.12)}
+.video-card.active{border-color:#4472C4;background:#eef2ff}
+.video-card .vc-title{font-size:13px;font-weight:600;color:#1a1a2e;margin-bottom:6px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.video-card .vc-meta{font-size:12px;color:#64748b}
+.video-card .vc-count{font-size:20px;font-weight:700;color:#4472C4}
+.video-card .vc-toggle{font-size:11px;color:#4472C4;margin-top:6px;cursor:pointer}
+
+/* Comment detail list */
+.comment-detail{margin-top:12px;padding:12px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;display:none}
+.comment-detail.show{display:block}
+.comment-item{padding:6px 0;font-size:13px;border-bottom:1px dashed #e2e8f0}
+.comment-item:last-child{border-bottom:none}
+.comment-cat{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px;font-weight:600}
+.c-inquiry{background:#fee2e2;color:#991b1b}
+.c-intent{background:#ffedd5;color:#c2410c}
+.c-discuss{background:#fef3c7;color:#92400e}
+.c-positive{background:#d1fae5;color:#065f46}
+.c-negative{background:#fee2e2;color:#991b1b}
+.c-social{background:#dbeafe;color:#1e40af}
+
+/* Purchase intent badge */
+.intent-badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:13px;font-weight:700;margin:8px 0}
+.intent-high{background:#fee2e2;color:#991b1b}
+.intent-medium{background:#fef3c7;color:#92400e}
+.intent-low{background:#d1fae5;color:#065f46}
+
+/* Loading */
+.loading{text-align:center;padding:30px;color:#64748b}
+.spinner{display:inline-block;width:36px;height:36px;border:3px solid #e2e8f0;border-top-color:#4472C4;border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress-bar{width:100%;height:6px;background:#e2e8f0;border-radius:3px;margin:12px 0;overflow:hidden}
+.progress-fill{height:100%;background:#4472C4;border-radius:3px;transition:width 0.3s}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filter-bar select,.filter-bar input{padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;font-family:inherit}
+.filter-bar input{min-width:200px}
+.filter-bar select:focus,.filter-bar input:focus{outline:none;border-color:#4472C4}
+
+/* Download */
+.download-btn{display:inline-block;background:#4472C4;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;cursor:pointer;border:none;font-size:14px;margin-right:8px}
+.download-btn:hover{background:#365899}
+
+/* Error/Empty */
+.empty-state{text-align:center;padding:60px 20px;color:#94a3b8}
+.empty-state .icon{font-size:48px;margin-bottom:12px}
+.error-box{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px 16px;border-radius:8px;font-size:13px;margin:12px 0}
+
+.hidden{display:none}
+.flex{display:flex}
+.gap-8{gap:8px}
+.mt-8{margin-top:8px}
+.mb-12{margin-bottom:12px}
+.text-sm{font-size:12px;color:#64748b}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>📊 达人账号选题 &amp; 评论分析系统 v3.0</h1>
+<p class="subtitle">输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向</p>
+
+<!-- Input Panel -->
+<div class="input-panel">
+<div class="input-row">
+<div class="input-group">
+<label>📱 平台</label>
+<select id="platform"><option value="Instagram">Instagram</option><option value="TikTok">TikTok</option></select>
+</div>
+<div class="input-group">
+<label>🌐 语言</label>
+<select id="language"><option value="en" selected>英语</option><option value="es">西语</option></select>
+</div>
+<div class="input-group" style="flex:3">
+<label>📥 达人链接或ID <span style="font-weight:400;color:#64748b;font-size:11px">（多个用逗号/换行分隔）</span></label>
+<textarea id="input-url" placeholder="例如: @letsdodizz, @imparkerburton&#10;或一行一个达人ID" rows="2" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical">@letsdodizz</textarea>
+</div>
+<div class="input-group">
+<label>📅 采集天数</label>
+<select id="fetch-days">
+<option value="7">7天</option><option value="14">14天</option><option value="30" selected>30天</option><option value="60">60天</option><option value="90">90天</option>
+</select>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<button class="btn" id="analyze-btn" onclick="analyzeInfluencer()">🔍 单个分析</button>
+<button class="btn btn-secondary" id="batch-btn" onclick="batchAnalyze()">🚀 批量分析</button>
+</div>
+</div>
+<div class="status" id="status"></div>
+<div id="batch-progress" class="hidden" style="margin-top:12px">
+<div class="progress-bar"><div class="progress-fill" id="batch-progress-fill" style="width:0%"></div></div>
+<p class="text-sm" id="batch-progress-text"></p>
+</div>
+</div>
+
+<!-- Results Area -->
+<div id="results-area" class="hidden">
+
+<!-- Stats -->
+<div id="stats-row" class="stats"></div>
+
+<!-- Topic Distribution -->
+<div id="topic-section" class="section">
+<h2>📊 选题分布</h2>
+<div id="topic-chart" class="bar-chart"></div>
+</div>
+
+<!-- Video Detail -->
+<div id="video-section" class="section">
+<h2>📋 视频明细</h2>
+<div class="filter-bar">
+<select id="filter-cat"><option value="">全部分类</option></select>
+<input type="text" id="filter-kw" placeholder="🔎 搜索标题关键词..." oninput="applyFilters()">
+<select id="filter-sort" onchange="applyFilters()">
+<option value="date-desc">发布日期(新→旧)</option>
+<option value="comments-desc">评论数(高→低)</option>
+<option value="category">分类</option>
+</select>
+</div>
+<div id="video-list"></div>
+</div>
+
+<!-- Comment Analysis — Two Parts -->
+<div id="comment-analysis-section" class="section">
+<h2>💬 评论分析（SocialCrawl 实时抓取）</h2>
+<div id="comment-analysis-container">
+<div class="loading" id="comment-loading">
+<div class="spinner"></div>
+<p>正在从 SocialCrawl 抓取评论...</p>
+<div class="progress-bar"><div class="progress-fill" id="comment-progress" style="width:0%"></div></div>
+<p class="text-sm" id="comment-progress-text">等待开始...</p>
+</div>
+<div id="comment-parts" class="hidden"></div>
+</div>
+</div>
+
+<!-- Download -->
+<div id="download-section" class="section">
+<h2>📥 下载报告</h2>
+<button class="download-btn" onclick="downloadExcel()">📥 下载完整分析数据 (Excel)</button>
+</div>
+
+</div>
+</div>
+
+<script>
+// ============ State ============
+let allVideos = [];
+let currentUsername = '';
+let currentPlatform = '';
+let commentAnalysisData = null;
+
+const CAT_COLORS = {
+    "3C配件品牌赞助/种草":"#F8CBAD","Apple/iOS生态":"#DDEBF7","其他品牌产品种草":"#FCE4D6",
+    "科技资讯/教程技巧":"#D9E1F2","AI工具/生活观点":"#E2EFDA","赞助广告内容":"#F4CCCC","其他":"#F2F2F2"
+};
+
+const COMMENT_CAT_INFO = {
+    "purchase_inquiry": ["产品咨询","c-inquiry","#FF6B6B"],
+    "purchase_intent": ["购买意向","c-intent","#FFD93D"],
+    "product_discussion": ["产品讨论","c-discuss","#6BCB77"],
+    "positive_feedback": ["正向反馈","c-positive","#4D96FF"],
+    "negative_feedback": ["负向反馈","c-negative","#E74C3C"],
+    "social_engagement": ["社交互动","c-social","#9B59B6"],
+    "other": ["其他","","#95A5A6"]
+};
+
+const SPONSORED_CATS = ["3C配件品牌赞助/种草","其他品牌产品种草","赞助广告内容"];
+
+// ============ Main Flow ============
+function parseInputs(text) {
+    // 支持逗号、换行、空格分隔
+    return text.split(/[,，\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+}
+
+async function analyzeInfluencer() {
+    const rawInput = document.getElementById('input-url').value.trim();
+    const inputs = parseInputs(rawInput);
+    const input = inputs[0] || '';
+    const platform = document.getElementById('platform').value;
+    const days = document.getElementById('fetch-days').value;
+    const language = document.getElementById('language').value;
+    const status = document.getElementById('status');
+    const btn = document.getElementById('analyze-btn');
+
+    if (!input) { status.innerHTML = '<span class="error">请输入达人账号</span>'; return; }
+
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在读取达人资源库...';
+
+    try {
+        // Step 1: Get video list + classification
+        const resp = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({input, platform, days, language})
+        });
+        const data = await resp.json();
+        if (data.error) { status.innerHTML = `<span class="error">${data.error}</span>`; btn.disabled = false; return; }
+
+        allVideos = data.videos || [];
+        currentUsername = data.username;
+        currentPlatform = data.platform;
+
+        // 缓存最新 → 直接显示
+        if (data.source === 'cache' && allVideos.length) {
+            renderTopicAndVideos();
+            document.getElementById('results-area').classList.remove('hidden');
+            status.innerHTML = `<span class="ok">${data.status || '✅ 缓存最新，共 ' + allVideos.length + ' 条视频'}</span>`;
+            btn.disabled = false;
+            await fetchCommentAnalysis();
+            return;
+        }
+
+        if (!allVideos.length) {
+            if (data.need_apify) {
+                status.innerHTML = `<span class="error">⚠️ ${data.message}</span>`;
+                document.getElementById('results-area').classList.remove('hidden');
+                const cachedInfo = data.cached_count ? `<p style="color:#059669">📦 已有 ${data.cached_count} 条历史缓存，抓取后将自动去重合并</p>` : '';
+                document.getElementById('stats-row').innerHTML = `
+                <div class="empty-state" style="width:100%">
+                    <div class="icon">🔌</div>
+                    <h3>需要 Apify 数据抓取</h3>
+                    <p style="margin:12px 0">${data.message}</p>
+                    ${cachedInfo}
+                    <div class="mt-8 flex gap-8" style="justify-content:center">
+                        <button class="btn" onclick="triggerApifyAuto()">🔑 自动抓取（Apify Key 已配置）</button>
+                        <button class="btn btn-secondary" onclick="showUploadInput()">📤 上传视频数据</button>
+                    </div>
+                    <div id="upload-input-area" class="hidden mt-8" style="max-width:500px;margin:12px auto">
+                        <textarea id="upload-json" placeholder='粘贴 JSON 视频列表 [{title,date,url,comments_count},...]' style="width:100%;height:100px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;margin-bottom:8px"></textarea>
+                        <button class="btn" onclick="uploadVideos()">上传数据</button>
+                    </div>
+                </div>`;
+                document.getElementById('topic-section').classList.add('hidden');
+                document.getElementById('video-section').classList.add('hidden');
+                document.getElementById('comment-analysis-section').classList.add('hidden');
+                document.getElementById('download-section').classList.add('hidden');
+            }
+            btn.disabled = false;
+            return;
+        }
+
+        // Step 2: Render topic + video table
+        renderTopicAndVideos();
+        document.getElementById('results-area').classList.remove('hidden');
+        status.innerHTML = `<span class="ok">✅ 分析完成: ${allVideos.length} 条视频 | @${currentUsername} (${currentPlatform}) [${data.source}]</span>`;
+
+        // Step 3: Auto-fetch comment analysis
+        await fetchCommentAnalysis();
+
+    } catch(e) {
+        status.innerHTML = `<span class="error">请求失败: ${e.message}</span>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ============ Topic + Video Rendering ============
+function renderTopicAndVideos() {
+    if (!allVideos.length) return;
+
+    // Stats
+    const cats = {};
+    let totalComments = 0;
+    allVideos.forEach(v => {
+        cats[v['分类']] = (cats[v['分类']] || 0) + 1;
+        totalComments += parseInt(v['评论数']) || 0;
+    });
+    const total = allVideos.length;
+    const hitRate = 100 - ((cats['其他'] || 0) / total * 100);
+    const avgComments = Math.round(totalComments / total);
+    const sponsoredCount = allVideos.filter(v => SPONSORED_CATS.includes(v['分类'])).length;
+
+    document.getElementById('stats-row').innerHTML = `
+        <div class="stat"><div class="num">${total}</div><div class="label">视频总数</div></div>
+        <div class="stat"><div class="num">@${currentUsername}</div><div class="label">达人</div></div>
+        <div class="stat"><div class="num">${hitRate.toFixed(0)}%</div><div class="label">分类命中率</div></div>
+        <div class="stat"><div class="num">${avgComments}</div><div class="label">平均评论</div></div>
+        <div class="stat"><div class="num">${sponsoredCount}</div><div class="label">赞助/种草</div></div>
+    `;
+
+    // Topic bar chart
+    const sortedCats = Object.entries(cats).sort((a,b) => b[1] - a[1]);
+    const maxCount = Math.max(...sortedCats.map(c => c[1]), 1);
+    let barHTML = '';
+    sortedCats.forEach(([cat, count]) => {
+        const pct = (count / total * 100).toFixed(1);
+        const color = CAT_COLORS[cat] || '#F2F2F2';
+        const height = Math.max((count / maxCount) * 160, 8);
+        barHTML += `<div class="bar"><div class="bar-value">${count} (${pct}%)</div><div class="bar-fill" style="height:${height}px;background:${color}"></div><div class="bar-label">${cat}</div></div>`;
+    });
+    document.getElementById('topic-chart').innerHTML = barHTML;
+    document.getElementById('topic-section').classList.remove('hidden');
+
+    // Category filter
+    const filterCat = document.getElementById('filter-cat');
+    filterCat.innerHTML = '<option value="">全部分类</option>' + sortedCats.map(([cat]) => `<option value="${cat}">${cat}</option>`).join('');
+
+    // Video table
+    renderVideoList();
+    document.getElementById('video-section').classList.remove('hidden');
+    document.getElementById('download-section').classList.remove('hidden');
+}
+
+function renderVideoList() {
+    const catFilter = document.getElementById('filter-cat').value;
+    const kwFilter = document.getElementById('filter-kw').value.toLowerCase();
+    const sortBy = document.getElementById('filter-sort').value;
+
+    let videos = [...allVideos];
+    if (catFilter) videos = videos.filter(v => v['分类'] === catFilter);
+    if (kwFilter) videos = videos.filter(v => (v['标题']||'').toLowerCase().includes(kwFilter));
+    if (sortBy === 'comments-desc') videos.sort((a,b) => (b['评论数']||0) - (a['评论数']||0));
+    else if (sortBy === 'category') videos.sort((a,b) => (a['分类']||'').localeCompare(b['分类']||''));
+    else videos.sort((a,b) => (b['发布日期']||'').localeCompare(a['发布日期']||''));
+
+    let html = `<p style="font-size:13px;color:#64748b;margin-bottom:8px">显示 ${videos.length} / ${allVideos.length} 条</p>`;
+    html += `<table class="video-table"><thead><tr><th>发布日期</th><th>分类</th><th>标题</th><th>评论</th><th>链接</th><th>命中品牌</th></tr></thead><tbody>`;
+
+    videos.forEach(v => {
+        const cat = v['分类'] || '其他';
+        const color = CAT_COLORS[cat] || '#F2F2F2';
+        const title = (v['标题']||'').substring(0, 120) + ((v['标题']||'').length > 120 ? '...' : '');
+        const url = v['视频链接'] || '';
+        html += `<tr>
+<td>${v['发布日期']||''}</td>
+<td><span class="cat-badge" style="background:${color}">${cat.substring(0,14)}</span></td>
+<td>${escHtml(title)}</td>
+<td>${v['评论数']||0}</td>
+<td>${url ? `<a href="${escHtml(url)}" class="video-link" target="_blank" rel="noopener">🔗 打开</a>` : '-'}</td>
+<td>${v['命中品牌']||'-'}</td>
+</tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('video-list').innerHTML = html;
+}
+
+function applyFilters() { renderVideoList(); }
+document.getElementById('filter-cat').addEventListener('change', applyFilters);
+document.getElementById('filter-sort').addEventListener('change', applyFilters);
+
+// ============ Comment Analysis ============
+async function fetchCommentAnalysis() {
+    const container = document.getElementById('comment-analysis-section');
+    const loadingEl = document.getElementById('comment-loading');
+    const partsEl = document.getElementById('comment-parts');
+    const progressFill = document.getElementById('comment-progress');
+    const progressText = document.getElementById('comment-progress-text');
+
+    container.classList.remove('hidden');
+    loadingEl.classList.remove('hidden');
+    partsEl.classList.add('hidden');
+    progressFill.style.width = '0%';
+    progressText.textContent = '正在连接 SocialCrawl...';
+
+    try {
+        const resp = await fetch('/api/comments/analysis', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({videos: allVideos, platform: currentPlatform})
+        });
+
+        // Simulate progress while waiting
+        let progress = 0;
+        const progressInterval = setInterval(() => {
+            progress = Math.min(progress + Math.random() * 8, 90);
+            progressFill.style.width = progress + '%';
+            progressText.textContent = `正在抓取评论... (${Math.round(progress)}%)`;
+        }, 400);
+
+        const data = await resp.json();
+        clearInterval(progressInterval);
+        progressFill.style.width = '100%';
+        progressText.textContent = '分类完成 ✓';
+
+        if (data.error) {
+            loadingEl.innerHTML = `<div class="error-box">评论抓取失败: ${data.error}</div>`;
+            return;
+        }
+
+        commentAnalysisData = data;
+        setTimeout(() => {
+            loadingEl.classList.add('hidden');
+            partsEl.classList.remove('hidden');
+            renderCommentParts(data);
+        }, 300);
+
+    } catch(e) {
+        loadingEl.innerHTML = `<div class="error-box">请求失败: ${e.message}</div>`;
+    }
+}
+
+function renderCommentParts(data) {
+    const partsEl = document.getElementById('comment-parts');
+    let html = '';
+
+    // Part 1: TOP-3 Hot Videos
+    html += renderCommentPart(data.part1_top3_hot, 1, '🔥 TOP-3 热门视频评论分布', '按评论数降序选取');
+
+    // Part 2: TOP-3 Sponsored Videos
+    html += renderCommentPart(data.part2_top3_sponsored, 2, '💼 TOP-3 赞助/种草视频评论分布', '按赞助/种草分类中评论数降序选取');
+
+    partsEl.innerHTML = html;
+
+    // Auto-expand first video in each part
+    setTimeout(() => {
+        document.querySelectorAll('.video-card').forEach((card, i) => {
+            if (i % 3 === 0) card.click();
+        });
+    }, 100);
+}
+
+function renderCommentPart(partData, partNum, title, subtitle) {
+    if (!partData || !partData.videos || !partData.videos.length) {
+        return `<div class="comment-part"><div class="comment-part-header"><h3>${title}</h3></div><div class="comment-part-body"><p class="text-sm">暂无数据</p></div></div>`;
+    }
+
+    let html = `<div class="comment-part">
+    <div class="comment-part-header">
+        <div><h3>${title}</h3><span class="text-sm">${subtitle}</span></div>
+        <span class="intent-badge intent-${partData.purchase_intent_label.includes('高')?'high':partData.purchase_intent_label.includes('中')?'medium':'low'}">
+            🛒 ${partData.purchase_intent_label} (${partData.purchase_intent_score})
+        </span>
+    </div>
+    <div class="comment-part-body">`;
+
+    // Video cards
+    html += '<div class="video-cards">';
+    partData.videos.forEach((v, i) => {
+        const vid = `p${partNum}-v${i}`;
+        const hasComments = v.classified_comments && v.classified_comments.length > 0;
+        html += `<div class="video-card" id="card-${vid}" onclick="toggleCommentDetail('${vid}')">
+            <div class="vc-count">${v.native_comment_count}</div>
+            <div class="vc-meta">条评论</div>
+            <div class="vc-title">${escHtml(v.title.substring(0,80))}</div>
+            <div class="vc-meta">抓取: ${v.fetched_comment_count} 条有效评论</div>
+            ${v.fetch_error ? `<div class="vc-meta" style="color:#dc2626">⚠️ ${v.fetch_error}</div>` : ''}
+            <div class="vc-toggle">${hasComments ? '▼ 展开评论' : '无评论数据'}</div>
+        </div>`;
+    });
+    html += '</div>';
+
+    // Comment detail lists (hidden by default)
+    partData.videos.forEach((v, i) => {
+        const vid = `p${partNum}-v${i}`;
+        html += `<div class="comment-detail" id="detail-${vid}">`;
+        if (v.classified_comments && v.classified_comments.length > 0) {
+            html += `<p class="text-sm mb-12">📝 ${v.classified_comments.length} 条分类评论 (共抓取 ${v.total_raw_comments} 条)</p>`;
+            v.classified_comments.forEach(c => {
+                const [catName, catCls] = COMMENT_CAT_INFO[c.category_key] || [c.category,''];
+                html += `<div class="comment-item">
+                    <span class="comment-cat ${catCls}">${catName}</span>
+                    👍 ${c.likes} @${escHtml(c.username||'匿名')} — ${escHtml((c.text||'').substring(0,120))}
+                </div>`;
+            });
+        } else if (v.fetch_error) {
+            html += `<p class="error-box">抓取失败: ${v.fetch_error}</p>`;
+        } else {
+            html += '<p class="text-sm">无有效评论</p>';
+        }
+        html += '</div>';
+    });
+
+    // Aggregate distribution bar chart
+    html += '<h3 style="margin-top:20px">📊 汇总评论分类分布</h3>';
+    html += renderDistBarChart(partData.aggregate_distribution, partData.total_classified_comments);
+
+    html += '</div></div>';
+    return html;
+}
+
+function renderDistBarChart(distribution, total) {
+    if (!distribution || !total) return '<p class="text-sm">暂无评论数据</p>';
+
+    const entries = Object.entries(distribution).sort((a,b) => b[1].count - a[1].count);
+    const maxCount = Math.max(...entries.map(e => e[1].count), 1);
+
+    let html = '<div class="bar-chart">';
+    entries.forEach(([key, data]) => {
+        const [catName, catCls, catColor] = COMMENT_CAT_INFO[key] || [key, '', '#95A5A6'];
+        const height = Math.max((data.count / maxCount) * 160, 8);
+        html += `<div class="bar">
+            <div class="bar-value">${data.count} (${data.pct}%)</div>
+            <div class="bar-fill" style="height:${height}px;background:${catColor}"></div>
+            <div class="bar-label">${catName}</div>
+        </div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
+function toggleCommentDetail(vid) {
+    const detail = document.getElementById('detail-' + vid);
+    const card = document.getElementById('card-' + vid);
+    const allDetails = document.querySelectorAll('.comment-detail');
+    const allCards = document.querySelectorAll('.video-card');
+
+    // Close all other details
+    allDetails.forEach(d => { if (d.id !== 'detail-'+vid) d.classList.remove('show'); });
+    allCards.forEach(c => { if (c.id !== 'card-'+vid) c.classList.remove('active'); });
+
+    // Toggle current
+    const isOpen = detail.classList.contains('show');
+    if (isOpen) {
+        detail.classList.remove('show');
+        card.classList.remove('active');
+        card.querySelector('.vc-toggle').textContent = '▼ 展开评论';
+    } else {
+        detail.classList.add('show');
+        card.classList.add('active');
+        card.querySelector('.vc-toggle').textContent = '▲ 收起评论';
+    }
+}
+
+// ============ Apify / Upload helpers ============
+function showUploadInput() {
+    document.getElementById('upload-input-area').classList.toggle('hidden');
+}
+
+async function triggerApifyAuto() {
+    const status = document.getElementById('status');
+    const btn = document.getElementById('analyze-btn');
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在通过 Apify 抓取最新数据（自动去重合并）...';
+
+    try {
+        const resp = await fetch('/api/apify/fetch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                username: currentUsername,
+                platform: currentPlatform,
+                days: parseInt(document.getElementById('fetch-days').value),
+                api_key: 'apify_api_lNbEszC31JbjeynU2JiEVpEE4WA0JO2IyFt4',
+                language: document.getElementById('language').value
+            })
+        });
+        const data = await resp.json();
+        if (data.error) { status.innerHTML = `<span class="error">${data.error}</span>`; btn.disabled = false; return; }
+
+        allVideos = data.videos || [];
+        renderTopicAndVideos();
+        document.getElementById('results-area').classList.remove('hidden');
+        status.innerHTML = `<span class="ok">✅ ${data.message}</span>`;
+        await fetchCommentAnalysis();
+    } catch(e) {
+        status.innerHTML = `<span class="error">Apify 请求失败: ${e.message}</span>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ============ Batch Analysis ============
+async function batchAnalyze() {
+    const rawInput = document.getElementById('input-url').value.trim();
+    const inputs = parseInputs(rawInput);
+    const platform = document.getElementById('platform').value;
+    const days = document.getElementById('fetch-days').value;
+    const language = document.getElementById('language').value;
+    const status = document.getElementById('status');
+    const batchBtn = document.getElementById('batch-btn');
+    const progressBar = document.getElementById('batch-progress');
+    const progressFill = document.getElementById('batch-progress-fill');
+    const progressText = document.getElementById('batch-progress-text');
+
+    if (!inputs.length) { status.innerHTML = '<span class="error">请输入达人账号</span>'; return; }
+
+    batchBtn.disabled = true;
+    status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在检查 ${inputs.length} 个达人的缓存状态...`;
+    progressBar.classList.remove('hidden');
+
+    try {
+        // Step 1: Check cache for all
+        const checkResp = await fetch('/api/batch/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({inputs, platform, days, language})
+        });
+        const checkData = await checkResp.json();
+
+        const cachedUsers = checkData.cached || [];
+        const needApifyUsers = checkData.need_apify || [];
+        const total = checkData.total || inputs.length;
+
+        progressText.textContent = `${cachedUsers.length} 个有缓存，${needApifyUsers.length} 个需抓取`;
+        progressFill.style.width = '30%';
+
+        // Step 2: Fetch missing ones via Apify
+        if (needApifyUsers.length > 0) {
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在抓取 ${needApifyUsers.length} 个达人...`;
+            progressText.textContent = `正在 Apify 抓取中... (0/${needApifyUsers.length})`;
+
+            const fetchResp = await fetch('/api/batch/fetch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    usernames: needApifyUsers.map(u => u.username),
+                    platform, days, language
+                })
+            });
+            const fetchData = await fetchResp.json();
+            progressFill.style.width = '80%';
+            progressText.textContent = `抓取完成: ${fetchData.total_done} 成功, ${fetchData.total_error} 失败`;
+
+            // Merge cached results
+            allVideos = [];
+            for (const r of fetchData.results) {
+                if (r.videos && r.videos.length) {
+                    allVideos.push(...r.videos);
+                }
+            }
+        }
+
+        // Step 3: Load cached videos for already-cached users
+        if (cachedUsers.length > 0 && needApifyUsers.length === 0) {
+            // All cached — load from cache
+            allVideos = [];
+            for (const cu of cachedUsers) {
+                const resp = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({input: cu.username, platform, days, language})
+                });
+                const data = await resp.json();
+                if (data.videos) allVideos.push(...data.videos);
+            }
+        }
+
+        progressFill.style.width = '100%';
+        progressText.textContent = `✅ 全部完成: ${allVideos.length} 条视频`;
+
+        if (allVideos.length > 0) {
+            renderTopicAndVideos();
+            document.getElementById('results-area').classList.remove('hidden');
+            status.innerHTML = `<span class="ok">✅ 批量分析完成: ${inputs.length} 个达人, ${allVideos.length} 条视频</span>`;
+        } else {
+            status.innerHTML = '<span class="error">所有达人均无缓存数据，请先单个抓取</span>';
+        }
+    } catch(e) {
+        status.innerHTML = `<span class="error">批量分析失败: ${e.message}</span>`;
+    } finally {
+        batchBtn.disabled = false;
+        progressBar.classList.add('hidden');
+    }
+}
+
+async function uploadVideos() {
+    const jsonStr = document.getElementById('upload-json').value.trim();
+    if (!jsonStr) { alert('请粘贴 JSON 数据'); return; }
+
+    let videos;
+    try { videos = JSON.parse(jsonStr); } catch(e) { alert('JSON 格式错误'); return; }
+    if (!Array.isArray(videos)) { alert('JSON 应为数组'); return; }
+
+    const status = document.getElementById('status');
+    const btn = document.getElementById('analyze-btn');
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在上传数据...';
+
+    try {
+        const resp = await fetch('/api/upload/videos', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: currentUsername, platform: currentPlatform, videos})
+        });
+        const data = await resp.json();
+        if (data.error) { status.innerHTML = `<span class="error">${data.error}</span>`; btn.disabled = false; return; }
+
+        allVideos = data.videos || [];
+        renderTopicAndVideos();
+        status.innerHTML = `<span class="ok">✅ ${data.message}</span>`;
+        await fetchCommentAnalysis();
+    } catch(e) {
+        status.innerHTML = `<span class="error">上传失败: ${e.message}</span>`;
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// ============ Download ============
+async function downloadExcel() {
+    if (!allVideos.length) { alert('暂无数据可下载'); return; }
+
+    const btn = document.querySelector('.download-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 生成 Excel...';
+
+    try {
+        const resp = await fetch('/api/download/excel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                videos: allVideos,
+                comments: commentAnalysisData || {},
+                username: currentUsername,
+                platform: currentPlatform,
+            })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('下载失败: ' + (err.error || resp.statusText));
+            return;
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `达人分析_${currentUsername}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        alert('下载失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📥 下载完整分析数据 (Excel)';
+    }
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============ Init ============
+// Page loads with empty state — user must input influencer
+document.getElementById('results-area').classList.add('hidden');
+</script>
+</body>
+</html>

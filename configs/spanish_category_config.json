@@ -1,0 +1,377 @@
+{
+  "brands_3c_accessories": {
+    "anker": {
+      "labels": ["充电宝", "充电器"],
+      "keywords": ["powerbank", "power bank", "cargador", "cable", "carga"]
+    },
+    "ugreen": {
+      "labels": ["扩展坞", "配件", "追踪器", "NAS"],
+      "keywords": ["docking", "finetrack", "nas", "cable", "rastreador", "llavero"]
+    },
+    "iniu": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "snapgo"]
+    },
+    "cuktech": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "cuktechcp13", "qi2", "magsafe"]
+    },
+    "belkin": {
+      "labels": ["保护壳", "配件"],
+      "keywords": ["case", "protector", "lilypad", "ipad case"]
+    },
+    "torras": {
+      "labels": ["手机壳"],
+      "keywords": ["funda", "case", "proteccion"]
+    },
+    "lilypad": {
+      "labels": ["保护壳", "配件"],
+      "keywords": ["ipad case", "protector", "toy story"]
+    },
+    "wozoyo": {
+      "labels": ["扩展坞"],
+      "keywords": ["docking station", "docking", "usb"]
+    },
+    "alpaka": {
+      "labels": ["包", "配件"],
+      "keywords": ["sling", "mochila", "bag"]
+    },
+    "tapo": {
+      "labels": ["智能家居配件"],
+      "keywords": ["aspiradora", "robot", "limpieza"]
+    },
+    "baseus": {
+      "labels": ["充电宝", "充电器", "数据线"],
+      "keywords": ["powerbank", "power bank", "cargador", "cable", "baseus"]
+    },
+    "romoss": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "romoss"]
+    },
+    "xiaomi": {
+      "labels": ["充电宝", "充电器"],
+      "keywords": ["powerbank", "power bank", "xiaomi", "mi power", "redmi"]
+    },
+    "charmast": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "charmast"]
+    },
+    "sharge": {
+      "labels": ["充电器"],
+      "keywords": ["cargador", "sharge", "shargeek"]
+    },
+    "nimble": {
+      "labels": ["充电宝", "充电器"],
+      "keywords": ["powerbank", "power bank", "nimble", "champ"]
+    },
+    "iwalk": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "iwalk"]
+    },
+    "miady": {
+      "labels": ["充电宝"],
+      "keywords": ["powerbank", "power bank", "miady"]
+    }
+  },
+
+  "brands_other": {
+    "samsung": {
+      "labels": ["手机"],
+      "keywords": ["galaxy", "fold", "plegable", "z fold"]
+    },
+    "motorola": {
+      "labels": ["手机"],
+      "keywords": ["razr", "plegable"]
+    },
+    "tcl": {
+      "labels": ["手机"],
+      "keywords": ["nxtppaper", "nxt paper"]
+    },
+    "oppo": {
+      "labels": ["手机"],
+      "keywords": ["find x9", "oppo find"]
+    },
+    "infinix": {
+      "labels": ["手机"],
+      "keywords": ["gt 50 pro", "infinix gt"]
+    },
+    "hisense": {
+      "labels": ["电视"],
+      "keywords": ["tv", "television", "google tv"]
+    },
+    "dji": {
+      "labels": ["无人机", "麦克风"],
+      "keywords": ["dron", "mic", "microfono"]
+    },
+    "ringconn": {
+      "labels": ["智能戒指"],
+      "keywords": ["smart ring", "anillo inteligente"]
+    },
+    "fitbit": {
+      "labels": ["智能穿戴"],
+      "keywords": ["fitbit"]
+    },
+    "elegoo": {
+      "labels": ["3D打印机"],
+      "keywords": ["impresora 3d", "centauri", "filamento"]
+    },
+    "hoverair": {
+      "labels": ["无人机"],
+      "keywords": ["dron", "hoverair x1", "tracking drone"]
+    },
+    "sihoo": {
+      "labels": ["人体工学椅"],
+      "keywords": ["silla", "ergonomica", "doro"]
+    },
+    "libernovo": {
+      "labels": ["人体工学椅"],
+      "keywords": ["silla", "omni", "bionic flex"]
+    },
+    "typeless": {
+      "labels": ["AI应用"],
+      "keywords": ["typeless"]
+    },
+    "wondershare": {
+      "labels": ["软件"],
+      "keywords": ["drfone", "mobiletrans"]
+    },
+    "lovart": {
+      "labels": ["AI设计"],
+      "keywords": ["lovart"]
+    },
+    "hasselblad": {
+      "labels": ["相机"],
+      "keywords": ["camara", "lente", "hasselblad"]
+    }
+  },
+
+  "explicit_sponsor_markers": [
+    "#ad",
+    "#att",
+    "attinfluencer",
+    "sponsored"
+  ],
+  "publi_prefix": true,
+
+  "review_signals": [
+    "probado",
+    "probando",
+    "he probado",
+    "lo tengo en mis manos",
+    "unboxing",
+    "mi opinion",
+    "mi opinión",
+    "review",
+    "echar un vistazo",
+    "conoce mas",
+    "conoce más",
+    "conoce por aqui",
+    "conoce por aquí",
+    "te muestro",
+    "los primeros",
+    "adquirirla",
+    "toco explorar",
+    "lo tengo en",
+    "en mis manos",
+    "la powerbank mas",
+    "la powerbank más"
+  ],
+
+  "news_signals": [
+    "lanza",
+    "lanzo",
+    "lanzar",
+    "es oficial",
+    "anuncia",
+    "anuncio",
+    "presenta",
+    "presento",
+    "rumor",
+    "rumores",
+    "filtracion",
+    "filtración",
+    "llega",
+    "llegada",
+    "nuevo",
+    "nueva",
+    "esta preparando",
+    "preparando",
+    "proximamente",
+    "próximamente",
+    "se espera",
+    "se confirma",
+    "confirmo",
+    "confirmó"
+  ],
+
+  "sponsor_signals": [
+    "comenta link",
+    "comenta \"link\"",
+    "comenta link",
+    "te paso enlace",
+    "enlace en mi bio",
+    "link in bio",
+    "enlace directo",
+    "codigo de descuento",
+    "código de descuento",
+    "codigo:",
+    "código:",
+    "usa el codigo",
+    "usa el código",
+    "descuento",
+    "promo",
+    "oferta",
+    "shout out"
+  ],
+
+  "category_keywords": {
+    "Apple/iOS生态": [
+      "iphone", "ipad", "ios27", "ios 27", "ipados", "siri",
+      "apple watch", "macbook", "macbookneo", "macbook air",
+      "apple park", "icloud", "apple", "#apple", "wwdc",
+      "dynamic island", "apple silicon", "app store", "airdrop",
+      "apple intelligence", "iphone 11", "iphone 14", "iphone 17",
+      "iphone 18", "beta de ios", "ios 26", "firmar pdf",
+      "trackpad", "steve jobs", "#ios27", "#iphonetips",
+      "ipados27", "wwdc26", "albumes compartidos",
+      "álbumes compartidos", "sacar foto", "foto a la luna"
+    ],
+    "AI工具/生活观点": [
+      "chatgpt", "gemini vs", "gemini live", "claude", "perplexity", "cursor",
+      "lovart", "emergent", "wingman", "image playground",
+      "inteligencia artificial", "la ia", "una ia",
+      "ia puede", "ia ya puede", "herramientas de ia",
+      "ai tools", "#ia", "#chatgpt", "chatgptprompts",
+      "generador de imagenes", "generador de imágenes",
+      "prompt", "24 horas", "decisiones",
+      "keepsake", "startup", "acceso anticipado",
+      "he estado trabajando", "carrd.co",
+      "stanford", "veto algorítmico", "veto algoritmico",
+      "sesgo racial", "ransomware", "memoria digital",
+      "muy pocos usan la ia", "la ia ya puede"
+    ],
+    "科技资讯/教程技巧": [
+      "whatsapp", "nombre de usuario", "username",
+      "mundial", "world cup", "worldcup", "méxico",
+      "fútbol", "futbol", "marcador", "partido",
+      "#mundial", "#mexico", "#worldcup2026",
+      "trucos", "tips", "tip de", "paso a paso",
+      "tutorial", "cómo", "como", "navegadores privados",
+      "privacidad", "trucosiphone", "typeless",
+      "correo electrónico", "correo electronico",
+      "spotify", "snapchat", "beta", "guía", "guia",
+      "secreto", "no sabías", "no sabias", "no conoce",
+      "android", "regleta", "caligrafía", "mac mini",
+      "meta", "gafas inteligentes", "smartwatch",
+      "anillo inteligente", "anillos inteligentes",
+      "televisión", "television", "proyector",
+      "estabilizador", "batería de tu android",
+      "tecnología", "gadgets", "mi tecnología"
+    ]
+  },
+
+  "llm_config": {
+    "enabled": false,
+    "api_base": "",
+    "api_key_env": "LLM_API_KEY",
+    "model": "gpt-4o-mini",
+    "prompt_template": "你是一个IG视频标题分类助手。请将以下标题分类到以下5个类别之一：3C配件品牌赞助/种草、Apple/iOS生态、其他品牌产品种草、科技资讯/教程技巧、AI工具/生活观点。返回JSON格式：{\"category\": \"分类名\", \"keywords\": \"关键词1, 关键词2\"}"
+  },
+
+  "promotion_patterns": {
+    "problem_solution": [
+      "el problema con",
+      "el problema es",
+      "este",
+      "esta",
+      "resuelve",
+      "soluciona",
+      "la solución",
+      "la solucion"
+    ],
+    "feature_list": [
+      "✔️",
+      "✅",
+      "☑️",
+      "✗",
+      "❌"
+    ],
+    "purchase_intent": [
+      "aquí está el link",
+      "aqui esta el link",
+      "te paso el link",
+      "enlace en mi bio",
+      "link en mi bio",
+      "enlace en la bio",
+      "lo encontré en",
+      "lo encontre en",
+      "lo compré en",
+      "lo compre en",
+      "código:",
+      "codigo:",
+      "utiliza este código",
+      "utiliza este codigo",
+      "usa este código",
+      "usa este codigo",
+      "con este código",
+      "con este codigo",
+      "descuento",
+      "oferta"
+    ],
+    "personal_review": [
+      "he probado",
+      "probé",
+      "probe",
+      "mi opinión",
+      "mi opinion",
+      "lo que pienso",
+      "después de probar",
+      "despues de probar",
+      "tras probar",
+      "volviendo a comprar",
+      "volvería a comprar",
+      "volveria a comprar",
+      "compraría de nuevo",
+      "compraria de nuevo"
+    ],
+    "recommendation_list": [
+      "top ",
+      "los mejores",
+      "las mejores",
+      "recomiendo",
+      "recomendados",
+      "imprescindibles",
+      "gadgets que",
+      "productos que",
+      "herramientas que"
+    ]
+  },
+
+  "tutorial_patterns": [
+    "tips de",
+    "trucos de",
+    "tips para",
+    "trucos para",
+    "cómo hacer",
+    "como hacer",
+    "cómo activar",
+    "como activar",
+    "cómo cambiar",
+    "como cambiar",
+    "cómo configurar",
+    "como configurar",
+    "cómo usar",
+    "como usar",
+    "paso a paso",
+    "tutorial de",
+    "tutorial para",
+    "guía de",
+    "guia de",
+    "guía para",
+    "guia para",
+    "te enseño",
+    "aprende a",
+    "descubre cómo",
+    "descubre como"
+  ]
+}

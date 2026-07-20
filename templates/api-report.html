@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>达人分析系统 — API 工具评估报告 v2（大白话版）</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.9;color:#1a1a2e;background:#f0f2f5;padding:24px}
+.container{max-width:1100px;margin:0 auto}
+
+h1{font-size:28px;margin-bottom:4px;color:#0f172a}
+h2{font-size:22px;color:#1e293b;margin:36px 0 16px;padding-bottom:8px;border-bottom:3px solid #4472C4}
+h3{font-size:17px;color:#334155;margin:24px 0 12px}
+.subtitle{color:#64748b;font-size:14px;margin-bottom:32px}
+
+.card{background:#fff;border-radius:14px;padding:28px;margin-bottom:24px;box-shadow:0 2px 16px rgba(0,0,0,0.06)}
+
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+th{background:#1e293b;color:#fff;padding:12px 14px;text-align:left;font-weight:600;font-size:13px}
+td{padding:12px 14px;border-bottom:1px solid #e2e8f0}
+tr:nth-child(even){background:#f8fafc}
+
+.big-num{font-size:32px;font-weight:800;color:#4472C4;line-height:1.2}
+.big-num-green{font-size:32px;font-weight:800;color:#059669;line-height:1.2}
+.big-num-red{font-size:32px;font-weight:800;color:#dc2626;line-height:1.2}
+
+.verdict{background:linear-gradient(135deg,#1e293b,#334155);color:#fff;border-radius:14px;padding:32px;margin-bottom:24px}
+.verdict h2{color:#fff;border-bottom-color:rgba(255,255,255,0.2);margin-top:0}
+.verdict .winner{font-size:36px;font-weight:800;color:#fbbf24;margin:8px 0}
+
+.conclusion-box{background:#f0fdf4;border:2px solid #22c55e;border-radius:12px;padding:24px;margin:20px 0}
+.conclusion-box h3{color:#065f46;margin-top:0}
+.conclusion-box ul{margin:8px 0 0 20px}
+.conclusion-box li{margin:6px 0}
+
+.compare-box{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin:20px 0}
+.compare-card{background:#f8fafc;border:2px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center}
+.compare-card.winner{border-color:#22c55e;background:#f0fdf4}
+.compare-card.loser{border-color:#fecaca;background:#fef2f2}
+.compare-card h4{margin:0 0 4px;font-size:14px;color:#64748b}
+.compare-card .num{font-size:28px;font-weight:800;margin:8px 0}
+.compare-card .desc{font-size:12px;color:#64748b}
+
+.tag{display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:700}
+.tag-win{background:#d1fae5;color:#065f46}
+.tag-lose{background:#fee2e2;color:#991b1b}
+.tag-neutral{background:#fef3c7;color:#92400e}
+
+.step{display:flex;gap:16px;margin:16px 0;align-items:flex-start}
+.step-num{background:#4472C4;color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;flex-shrink:0;margin-top:2px}
+.step-body{flex:1}
+.step-body h4{margin:0 0 4px}
+
+.qa{margin:16px 0}
+.qa .q{font-weight:700;color:#4472C4;margin-bottom:4px}
+.qa .a{margin-left:12px;padding-left:12px;border-left:3px solid #e2e8f0;color:#334155}
+
+.highlight{background:#fffbeb;border-left:4px solid #f59e0b;padding:16px 20px;border-radius:4px;margin:16px 0;font-size:14px}
+
+hr{border:none;border-top:1px solid #e2e8f0;margin:24px 0}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>📊 API 工具评估报告 v2</h1>
+<p class="subtitle">一句话说不清楚的评估不是好评估 | 2026-07-16</p>
+
+<!-- ============ 终极结论 ============ -->
+<div class="verdict">
+<h2>🥇 结论先行</h2>
+<div class="winner">选 ScrapeCreators，别纠结了。</div>
+<p style="font-size:16px;margin-top:12px;opacity:0.9">
+免费版就能干活，付费版同价位碾压所有对手。<br>
+SocialCrawl 太贵，Apify 有门槛，ScrapeCreators 是唯一正确答案。
+</p>
+</div>
+
+<!-- ============ 一张表说清楚 ============ -->
+<div class="card">
+<h2>📋 一张表看懂三个工具</h2>
+<table>
+<tr><th></th><th>🏆 ScrapeCreators</th><th>SocialCrawl</th><th>Apify</th></tr>
+<tr>
+<td><strong>花 1 块钱能抓几个视频的评论？</strong></td>
+<td><span class="big-num-green">140 个</span></td>
+<td><span class="big-num-red">4 个</span></td>
+<td>要先交 $49 门票 😞</td>
+</tr>
+<tr>
+<td><strong>免费额度能抓几个视频？</strong></td>
+<td><span class="big-num-green">100 个</span></td>
+<td><span class="big-num-red">20 个</span></td>
+<td>10 条/次（等于不能用）</td>
+</tr>
+<tr>
+<td><strong>一条视频能抓多少评论？</strong></td>
+<td>15-150 条（翻页可控）</td>
+<td>10-20 条（一次性的）</td>
+<td>1-500 条（付费后可设）</td>
+</tr>
+<tr>
+<td><strong>能按点赞排序吗？</strong></td>
+<td>❌ 但多抓后本地排一样</td>
+<td>✅ 原生排序</td>
+<td>✅ 付费版支持</td>
+</tr>
+<tr>
+<td><strong>IG 抓评论成功率</strong></td>
+<td>~90%（10次失败1次）</td>
+<td>高</td>
+<td>高</td>
+</tr>
+<tr>
+<td><strong>最低月费</strong></td>
+<td>$10 ≈ ¥72</td>
+<td>£9 ≈ ¥80</td>
+<td>$49 ≈ ¥350</td>
+</tr>
+<tr>
+<td><strong>适合谁</strong></td>
+<td><span class="tag tag-win">所有人</span></td>
+<td>不在乎钱的人</td>
+<td>只抓 IG 且要原生排序</td>
+</tr>
+</table>
+</div>
+
+<!-- ============ 大白话场景对比 ============ -->
+<div class="card">
+<h2>🎬 大白话场景：同一条视频，花一样的钱</h2>
+
+<h3>场景：我要分析一个达人的一条 IG 视频评论</h3>
+
+<div class="compare-box">
+<div class="compare-card winner">
+<h4>🏆 ScrapeCreators</h4>
+<div class="num" style="color:#059669">75-150 条</div>
+<div class="desc">花 5 credits<br>调 1 次 + 翻 4 页</div>
+<div style="margin-top:8px;font-size:12px;color:#64748b">量大管饱，本地排个序<br>高赞低赞全都有</div>
+</div>
+<div class="compare-card loser">
+<h4>SocialCrawl</h4>
+<div class="num" style="color:#dc2626">10-20 条</div>
+<div class="desc">花 5 credits<br>调 1 次，不能翻页</div>
+<div style="margin-top:8px;font-size:12px;color:#64748b">条条高赞，但就这点<br>长尾评论完全看不到</div>
+</div>
+<div class="compare-card loser">
+<h4>Apify（免费）</h4>
+<div class="num" style="color:#dc2626">10 条</div>
+<div class="desc">花 $0.005<br>随机 10 条</div>
+<div style="margin-top:8px;font-size:12px;color:#64748b">免费的只有 10 条<br>还不能挑，随机的</div>
+</div>
+</div>
+
+<div class="conclusion-box">
+<h3>💡 大白话翻译</h3>
+<ul>
+<li><strong>SocialCrawl</strong>：去餐厅点菜，只能点一道，好吃但吃不饱</li>
+<li><strong>Apify 免费</strong>：免费试吃，就给一小口，还随机上菜</li>
+<li><strong>ScrapeCreators</strong>：自助餐，花一样的钱随便拿，吃完了还能再拿</li>
+</ul>
+</div>
+</div>
+
+<!-- ============ 实际业务能解决什么问题 ============ -->
+<div class="card">
+<h2>💼 实际业务：分别能解决什么问题</h2>
+
+<h3>你的核心需求回顾</h3>
+<ul style="margin-left:20px;font-size:14px">
+<li>每达人分析 6 条视频（TOP-3 热门 + TOP-3 赞助）</li>
+<li>每条视频至少 20 条评论</li>
+<li>需要看到评论分类的完整分布（不只是高赞）</li>
+<li>校准分类准确率到 90%+</li>
+</ul>
+
+<hr>
+
+<h3>用 ScrapeCreators 免费版</h3>
+<table>
+<tr><th>能做什么</th><th>不能做什么</th></tr>
+<tr>
+<td>✅ 测 80-100 个视频评论<br>✅ 每视频 15-30 条，不够就翻页<br>✅ 校准 10-15 个达人够用<br>✅ 长尾评论也抓得到，分类校准更准</td>
+<td>⚠️ 100 credits 用完就没了<br>⚠️ IG 有 ~10% 概率失败，重试即可</td>
+</tr>
+</table>
+
+<h3>用 ScrapeCreators Solo Dev（$10/月）</h3>
+<table>
+<tr><th>能做什么</th><th>不能做什么</th></tr>
+<tr>
+<td>✅ 每月分析 150+ 达人<br>✅ 每条视频翻 2 页拿 30-60 条评论<br>✅ 评论量大，校准样本足<br>✅ 本地排序，高赞照样筛得出</td>
+<td>⚠️ 还是没有原生 sort=top<br>（但大样本 + 本地排 = 效果一样）</td>
+</tr>
+</table>
+
+<h3>用 SocialCrawl（同样花 ~$10）</h3>
+<table>
+<tr><th>能做什么</th><th>不能做什么</th></tr>
+<tr>
+<td>✅ 原生高赞排序<br>✅ IG 成功率稳定</td>
+<td>❌ 只能测 20 个视频<br>❌ 不够校准用<br>❌ 看不到长尾评论<br>❌ 花同样的钱，量少 7 倍</td>
+</tr>
+</table>
+</div>
+
+<!-- ============ 免费 vs 付费 ============ -->
+<div class="card">
+<h2>🆓 → 💰 免费到付费的路线图</h2>
+
+<div class="step">
+<div class="step-num">1</div>
+<div class="step-body">
+<h4>现在（免费）— 先跑通</h4>
+<p>ScrapeCreators 免费 100 credits → 注册即用，零成本<br>
+能测 80-100 个视频，校准 10-15 个达人完全够<br>
+<strong>成本：¥0</strong></p>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">2</div>
+<div class="step-body">
+<h4>校准完成，正式使用（$10/月）</h4>
+<p>ScrapeCreators Solo Dev → 1000 credits/月<br>
+每月分析 150+ 达人，单视频翻页拿更多评论<br>
+<strong>成本：$10/月 ≈ ¥72</strong></p>
+</div>
+</div>
+
+<div class="step">
+<div class="step-num">3</div>
+<div class="step-body">
+<h4>规模化（$47/月）</h4>
+<p>ScrapeCreators Freelance → 5000 credits/月<br>
+每月分析 800+ 达人，评论量管够<br>
+<strong>成本：$47/月 ≈ ¥340</strong></p>
+</div>
+</div>
+
+<div class="highlight" style="margin-top:20px">
+<strong>⚠️ 什么时候才需要考虑换工具？</strong><br>
+只有一种情况：你对 IG 评论的 90% 成功率无法容忍，且预算充裕。那时可以切 Apify Starter（$49/月 + 评论按量），用它的 sortOrder=popular。但绝大多数场景下不值得。
+</div>
+</div>
+
+<!-- ============ QA ============ -->
+<div class="card">
+<h2>❓ 你可能还想问</h2>
+
+<div class="qa">
+<div class="q">Q: ScrapeCreators 没有 sort=top，怎么保证抓到高赞评论？</div>
+<div class="a">多抓 + 本地排序。一条视频抓 50-100 条评论，按 likes 降序排，Top 20 的高赞程度和 SocialCrawl 原生返回的几乎一样。你样本大了，自然覆盖到高赞。SocialCrawl 只是帮你筛好了，但筛完只剩 15 条。</div>
+</div>
+
+<div class="qa">
+<div class="q">Q: IG 评论 90% 成功率影响大吗？</div>
+<div class="a">不大。失败就重试一次，多花 1 credit。100 次里失败 10 次，重试 10 次，多花 10 credits。和 SocialCrawl 每条多花 4 credits 相比，这点损耗不值一提。</div>
+</div>
+
+<div class="qa">
+<div class="q">Q: Apify 真的完全不能用吗？</div>
+<div class="a">不是不能用，是门槛太高。免费版限 10 条/次等于废了，付费要先交 $49 月费才解锁正常用量。同样 $49，ScrapeCreators Freelance 能抓 5000 个视频。除非你对原生排序有执念，否则没必要。</div>
+</div>
+
+<div class="qa">
+<div class="q">Q: 标题抓取用谁？</div>
+<div class="a">标题和评论分开。标题用 Apify 免费 $5/月（actor sones/instagram-posts-scraper-lowcost，$1.50/千条），评论用 ScrapeCreators。各取所长。</div>
+</div>
+</div>
+
+<!-- ============ 行动清单 ============ -->
+<div class="card">
+<h2>✅ 现在立刻要做的事</h2>
+<table>
+<tr><th>#</th><th>做什么</th><th>花多少</th></tr>
+<tr><td>1</td><td>注册 ScrapeCreators 拿 100 免费 credits</td><td>¥0</td></tr>
+<tr><td>2</td><td>在系统里切到 ScrapeCreators 评论抓取（替换 SocialCrawl）</td><td>我来改</td></tr>
+<tr><td>3</td><td>测试 3 个达人，验证评论量和质量</td><td>~18 credits</td></tr>
+<tr><td>4</td><td>校准分类准确率到 90%+</td><td>¥0</td></tr>
+<tr><td>5</td><td>确认满意后，升级 Solo Dev $10/月</td><td>$10</td></tr>
+</table>
+</div>
+
+</div>
+</body>
+</html>

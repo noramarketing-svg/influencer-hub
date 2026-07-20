@@ -1,0 +1,161 @@
+{
+  "_description": "English Comment Classification Config - 7 categories with signal words, modeled after topic classification logic",
+
+  "categories": {
+    "purchase_inquiry": {
+      "name_en": "Purchase Inquiry",
+      "name_zh": "产品咨询",
+      "description": "User asking about price, specs, where to buy, availability",
+      "business_signal": "HIGH purchase intent",
+      "weight": 3,
+      "signals": [
+        "how much", "what's the price", "price?", "cost?",
+        "where to buy", "where can i get", "where to get", "where do i buy",
+        "link?", "link please", "send link", "drop the link", "link below",
+        "which model", "what model", "model name?", "what version",
+        "available?", "is it available", "where to find", "in stock",
+        "compatible with", "does it work with", "works with",
+        "what is this", "what's this called", "which one",
+        "shipping", "delivery", "ship to", "deliver to",
+        "discount code", "promo code", "coupon code", "any code",
+        "how to order", "how do i get", "how can i get",
+        "where can i buy", "where can i get", "where do i get",
+        "can i buy", "can i get", "where is this sold"
+      ]
+    },
+    "purchase_intent": {
+      "name_en": "Purchase Intent",
+      "name_zh": "购买意向",
+      "description": "User expressing desire to buy or having already purchased",
+      "business_signal": "HIGH conversion signal",
+      "weight": 5,
+      "signals": [
+        "i want this", "i need this", "i'm buying this", "gonna buy",
+        "just ordered", "just bought", "already ordered", "just copped",
+        "added to cart", "in my cart", "checking out", "on the way",
+        "getting this", "going to buy", "will buy", "ordering now",
+        "worth it", "so worth it", "take my money", "shut up and take",
+        "you sold me", "i'm sold", "convinced", "you convinced me",
+        "exactly what i need", "what i've been looking for",
+        "how do i buy", "where do i pay", "how to purchase",
+        "pulled the trigger", "finally got", "arrived today",
+        "mine is coming", "can't wait to get", "excited to try"
+      ]
+    },
+    "product_discussion": {
+      "name_en": "Product Discussion",
+      "name_zh": "产品讨论",
+      "description": "Discussing product features, comparisons, alternatives",
+      "business_signal": "MEDIUM intent",
+      "weight": 1,
+      "signals": [
+        "vs", "versus", "compared to", "comparison",
+        "better than", "worse than", "difference between",
+        "which is better", "which one is better", "or the",
+        "version", "generation", "previous model", "new model",
+        "alternative", "alternatives", "instead of",
+        "specs", "specifications", "features",
+        "battery life", "battery", "how's the battery", "whats the battery", "camera", "screen", "display",
+        "performance", "processor", "chip", "storage", "ram",
+        "how does it compare", "how's the", "what about",
+        "does it have", "does it come with", "is it waterproof",
+        "how long does", "how many", "what's the difference"
+      ]
+    },
+    "positive_feedback": {
+      "name_en": "Positive Feedback",
+      "name_zh": "正向反馈",
+      "description": "Praise, thanks, appreciation for the content or product",
+      "business_signal": "Content resonance",
+      "weight": 0.5,
+      "signals": [
+        "thank you", "thanks", "great video", "great review", "great content", "awesome",
+        "love this", "amazing", "incredible", "so good",
+        "great content", "good info", "helpful", "useful",
+        "best video", "favorite", "favourite",
+        "subscribed", "following", "keep it up", "keep going",
+        "well explained", "very clear", "finally someone",
+        "underrated", "deserves more", "criminally underrated",
+        "this is gold", "this is fire", "quality content",
+        "changed my", "game changer", "life changing",
+        "been using", "works great", "works perfectly",
+        "highly recommend", "definitely recommend",
+        "🔥", "👏", "🙌", "💯"
+      ]
+    },
+    "negative_feedback": {
+      "name_en": "Negative Feedback",
+      "name_zh": "负向反馈",
+      "description": "Criticism, complaints, issues with product or content",
+      "business_signal": "RISK signal",
+      "weight": -2,
+      "signals": [
+        "doesn't work", "not working", "broken", "stopped working",
+        "scam", "fake", "rip off", "waste of money", "waste",
+        "disappointed", "disappointing", "don't like", "not good",
+        "don't recommend", "not worth it", "not worth",
+        "overpriced", "overrated", "overhyped",
+        "trash", "garbage", "terrible", "horrible", "awful",
+        "don't buy", "skip this", "stay away", "avoid",
+        "broke after", "defective", "poor quality",
+        "returned", "sent it back", "refund", "regret buying",
+        "wish i didn't", "don't waste your", "save your money"
+      ]
+    },
+    "social_engagement": {
+      "name_en": "Social Engagement",
+      "name_zh": "社交互动",
+      "description": "@mentions of friends, sharing, tagging, casual chat",
+      "business_signal": "Virality potential",
+      "weight": 0.3,
+      "signals": [
+        "@", "check this out", "look at this",
+        "watch this", "see this", "reminds me of",
+        "tag", "tagging", "share", "forward",
+        "lol", "lmao", "haha", "lmaooo",
+        "😂", "🤣", "💀", "😭",
+        "this you", "that's you", "is this you",
+        "need", "you need this", "you should get",
+        "bro", "dude", "man", "fr", "ngl",
+        "same", "literally", "relatable", "mood",
+        "first", "early", "anyone else"
+      ]
+    },
+    "other": {
+      "name_en": "Other",
+      "name_zh": "其他",
+      "description": "Comments that don't fit other categories",
+      "business_signal": "Noise",
+      "weight": 0,
+      "signals": []
+    }
+  },
+
+  "purchase_intent_scoring": {
+    "description": "Aggregate purchase intent score per video/account",
+    "weights": {
+      "purchase_inquiry": 3,
+      "purchase_intent": 5,
+      "product_discussion": 1,
+      "positive_feedback": 0.5,
+      "negative_feedback": -2,
+      "social_engagement": 0.3,
+      "other": 0
+    },
+    "interpretation": {
+      "high": {"min_score": 2.0, "label": "High Purchase Intent", "label_zh": "高购买意向"},
+      "medium": {"min_score": 1.0, "label": "Medium Purchase Intent", "label_zh": "中购买意向"},
+      "low": {"min_score": 0, "label": "Low Purchase Intent", "label_zh": "低购买意向"}
+    }
+  },
+
+  "sponsored_product_signals": {
+    "description": "Signals that indicate a comment is about a sponsored/promoted product",
+    "signals": [
+      "link", "code", "discount", "promo", "buy",
+      "bought", "order", "ordered", "product",
+      "brand", "price", "how much", "where to buy",
+      "purchase", "shipping", "delivery"
+    ]
+  }
+}

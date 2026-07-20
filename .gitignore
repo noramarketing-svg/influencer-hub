@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+cache/
+reports/
+classified_results.xlsx
+*.log
+.env
