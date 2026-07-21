@@ -1,0 +1,42 @@
+# 达人分析系统 - 本地运行指南
+
+## 环境要求
+- Python 3.9 或以上
+- 能访问外网
+
+## 安装和启动（3 步）
+
+### 第 1 步：安装依赖
+打开终端（CMD 或 PowerShell），进入项目目录，运行：
+```
+pip install flask openpyxl requests
+```
+
+### 第 2 步：启动服务
+```
+python server.py
+```
+
+### 第 3 步：打开浏览器
+访问：http://localhost:8504
+
+---
+
+## 如果想从外网访问（手机 / 其他电脑）
+
+安装 ngrok：https://ngrok.com/download
+
+然后运行：
+```
+ngrok config add-authtoken 3GfEmDxf6F34wydf2aWmgaeK8BF_581HEWr65qkZ5Za5V9vo9
+ngrok http 8504
+```
+
+会显示一个网址，复制到手机浏览器就能访问。
+
+---
+
+## 注意事项
+- 所有 API Key 已内置在代码中，无需额外配置
+- 数据缓存存在 cache/ 目录下
+- 关闭终端窗口服务就停止
