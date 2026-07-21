@@ -1036,8 +1036,8 @@ async function downloadExcel() {
 }
 
 function escHtml(s) {
-    if (!s) return '';
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ============ Panel Navigation ============
@@ -1112,7 +1112,7 @@ async function analyzeSingleVideo() {
         if (videoAbortController.signal.aborted) {
             status.innerHTML = '<span class="error">分析已停止</span>';
         } else {
-            status.innerHTML = `<span class="error">请求失败: ${e.message}</span>`;
+            renderError('video-status', e.message || e, 'ScrapeCreators');
         }
     } finally {
         btn.disabled = false;
@@ -1377,11 +1377,12 @@ function isCreditError(errText) {
 function renderError(containerId, message, serviceName) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    if (isCreditError(message)) {
-        container.innerHTML = `<span class="error">${serviceName || 'API'} 额度已用完：${escHtml(message)}</span> 
+    const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+    if (isCreditError(msgStr)) {
+        container.innerHTML = `<span class="error">${serviceName || 'API'} 额度已用完：${escHtml(msgStr)}</span> 
             <button class="btn" style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="openSettingsModal()">⚙️ 输入新 Key</button>`;
     } else {
-        container.innerHTML = `<span class="error">${escHtml(message)}</span>`;
+        container.innerHTML = `<span class="error">${escHtml(msgStr)}</span>`;
     }
 }
 
