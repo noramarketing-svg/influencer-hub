@@ -975,7 +975,7 @@ async function downloadExcel() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `达人分析_${currentUsername}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        a.download = `达人分析_${currentUsername}_${currentPlatform}_${new Date().toISOString().slice(0,10)}.xlsx`;
         a.click();
         URL.revokeObjectURL(url);
     } catch(e) {
