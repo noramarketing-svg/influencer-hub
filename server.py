@@ -187,68 +187,73 @@ def api_report():
 @app.route("/api/analyze", methods=["POST"])
 def api_analyze():
     """Analyze an influencer - 增量更新 + 分类"""
-    data = request.get_json()
-    input_text = data.get("input", "")
-    platform = data.get("platform", "TikTok")
-    days = int(data.get("days", 30))
-    language = data.get("language", "en")
+    try:
+        data = request.get_json()
+        input_text = data.get("input", "")
+        platform = data.get("platform", "TikTok")
+        days = int(data.get("days", 30))
+        language = data.get("language", "en")
 
-    username = extract_username(input_text, platform)
-    if not username:
-        return jsonify({"error": "无法解析达人ID"}), 400
+        username = extract_username(input_text, platform)
+        if not username:
+            return jsonify({"error": "无法解析达人ID"}), 400
 
-    # Select classifier
-    if language == "es":
-        es_config = load_es_config()
-        classify_fn = lambda t: classify_title_es(t, es_config)
-    else:
-        en_config = load_en_config()
-        classify_fn = lambda t: classify_title_en(t, en_config)
+        # Select classifier
+        if language == "es":
+            es_config = load_es_config()
+            classify_fn = lambda t: classify_title_es(t, es_config)
+        else:
+            en_config = load_en_config()
+            classify_fn = lambda t: classify_title_en(t, en_config)
 
-    # 增量更新判断
-    need_refresh, cached, status_msg = needs_apify_refresh(username, platform, days)
+        # 增量更新判断
+        need_refresh, cached, status_msg = needs_apify_refresh(username, platform, days)
 
-    if not need_refresh:
-        # 缓存最新，直接用
-        results = []
-        for v in cached:
-            title = v.get("标题", v.get("title", ""))
-            brand, keywords, category, basis = classify_fn(title)
-            results.append({
-                "发布日期": v.get("发布日期", v.get("date", "")),
-                "达人ID": username,
-                "平台": platform,
-                "标题": title,
-                "视频链接": v.get("视频链接", v.get("url", "")),
-                "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
-                "分类": category,
-                "命中品牌": brand or "",
-                "命中关键词": keywords or "",
-                "分类依据": basis,
+        if not need_refresh:
+            # 缓存最新，直接用
+            results = []
+            for v in cached:
+                title = v.get("标题", v.get("title", ""))
+                brand, keywords, category, basis = classify_fn(title)
+                results.append({
+                    "发布日期": v.get("发布日期", v.get("date", "")),
+                    "达人ID": username,
+                    "平台": platform,
+                    "标题": title,
+                    "视频链接": v.get("视频链接", v.get("url", "")),
+                    "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
+                    "分类": category,
+                    "命中品牌": brand or "",
+                    "命中关键词": keywords or "",
+                    "分类依据": basis,
+                })
+            return jsonify({
+                "username": username, "platform": platform, "language": language,
+                "videos": results, "source": "cache", "status": status_msg
             })
-        return jsonify({
-            "username": username, "platform": platform, "language": language,
-            "videos": results, "source": "cache", "status": status_msg
-        })
 
-    # 需要补抓 — 返回状态提示，前端触发 Apify
-    if cached:
-        return jsonify({
-            "username": username, "platform": platform, "language": language,
-            "videos": [],
-            "source": "stale",
-            "need_apify": True,
-            "cached_count": len(cached),
-            "message": status_msg + "，请点击下方按钮抓取最新数据。"
-        })
-    else:
-        return jsonify({
-            "username": username, "platform": platform, "language": language,
-            "videos": [],
-            "source": "none",
-            "need_apify": True,
-            "message": "未找到缓存数据。请点击下方按钮通过 Apify 抓取标题数据。"
-        })
+        # 需要补抓 — 返回状态提示，前端触发 Apify
+        if cached:
+            return jsonify({
+                "username": username, "platform": platform, "language": language,
+                "videos": [],
+                "source": "stale",
+                "need_apify": True,
+                "cached_count": len(cached),
+                "message": status_msg + "，请点击下方按钮抓取最新数据。"
+            })
+        else:
+            return jsonify({
+                "username": username, "platform": platform, "language": language,
+                "videos": [],
+                "source": "empty",
+                "need_apify": True,
+                "cached_count": 0,
+                "message": "无缓存数据，请点击下方按钮抓取。"
+            })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"分析失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
 # ============================================================
