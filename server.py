@@ -252,13 +252,13 @@ def api_comments():
 
     try:
         if "instagram" in platform.lower():
-            comments = fetch_ig_comments(video_url)
+            comments = fetch_ig_comments_sc(video_url)
         elif "tiktok" in platform.lower():
-            comments = fetch_tiktok_comments(video_url)
+            comments = fetch_tiktok_comments_sc(video_url)
         else:
             return jsonify({"error": "Unknown platform"}), 400
 
-        valid = get_top_valid_comments(comments, 15)
+        valid = get_top_valid_comments(comments, 30)
         comment_config = load_comment_config()
 
         results = []
