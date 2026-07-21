@@ -506,6 +506,19 @@ def _calc_purchase_intent(classified_comments, config):
 # ============================================================
 # Helpers: 单条视频分析（板块 2）+ 批量 View 更新（板块 3）
 # ============================================================
+def _normalize_url(url):
+    """标准化视频链接：处理 Instagram /reels/ → /reel/，去除 query 参数"""
+    if not url:
+        return url
+    url = url.strip()
+    # Instagram /reels/ 统一为 /reel/
+    url = re.sub(r'instagram\.com/reels/', 'instagram.com/reel/', url, flags=re.IGNORECASE)
+    # 去除 query 参数
+    if '?' in url:
+        url = url.split('?')[0]
+    return url
+
+
 def _detect_platform(url):
     """从 URL 识别平台"""
     url = (url or "").lower()
@@ -695,6 +708,7 @@ def _run_batch_views(task_id, urls):
     results = []
     for i, url in enumerate(urls):
         _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{len(urls)}..."}
+        url = _normalize_url(url)
         platform = _detect_platform(url)
         try:
             meta = _fetch_video_metadata_sc(url, platform)
@@ -729,9 +743,11 @@ def api_video_analyze():
 
         if not platform:
             platform = _detect_platform(url)
+
         if platform not in ["TikTok", "Instagram"]:
             return jsonify({"error": "仅支持 TikTok 或 Instagram 视频链接"}), 400
 
+        url = _normalize_url(url)
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
         t = threading.Thread(target=_run_single_video_analysis, args=(task_id, url, platform, language))
@@ -809,26 +825,35 @@ def api_videos_views_upload():
         wb = load_workbook(tmp_path, data_only=True)
         ws = wb.active
 
-        # 找到 url 列
+        urls = []
+        # 策略 1：找表头名为 url/链接/link 的列
         headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
         url_col = None
         for i, h in enumerate(headers):
             if h in ['url', '链接', '视频链接', 'video_url', 'link']:
                 url_col = i
                 break
-        if url_col is None:
-            return jsonify({"error": "Excel 中未找到 url 列，请确保第一行包含 url 列名"}), 400
 
-        urls = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            val = row[url_col] if url_col < len(row) else None
-            if val and str(val).strip():
-                urls.append(str(val).strip())
+        if url_col is not None:
+            # 有表头，从第二行开始读
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                val = row[url_col] if url_col < len(row) else None
+                if val and str(val).strip():
+                    urls.append(str(val).strip())
+        else:
+            # 策略 2：无表头，扫描所有单元格，提取 TikTok/Instagram 链接
+            for row in ws.iter_rows(values_only=True):
+                for val in row:
+                    if not val:
+                        continue
+                    s = str(val).strip()
+                    if ('tiktok.com' in s.lower() or 'instagram.com' in s.lower()) and s.startswith('http'):
+                        urls.append(s)
 
         os.remove(tmp_path)
 
         if not urls:
-            return jsonify({"error": "未从 Excel 中解析到任何链接"}), 400
+            return jsonify({"error": "未从 Excel 中解析到任何链接，请确保包含 TikTok 或 Instagram 视频链接"}), 400
         if len(urls) > 200:
             return jsonify({"error": f"链接数量 {len(urls)} 超过 200 条限制"}), 400
 
