@@ -189,13 +189,14 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 
 <!-- Comment Analysis — Two Parts -->
 <div id="comment-analysis-section" class="section">
-<h2>💬 评论分析（SocialCrawl 实时抓取）</h2>
+<h2>💬 评论分析（ScrapeCreators 实时抓取）</h2>
 <div id="comment-analysis-container">
 <div class="loading" id="comment-loading">
 <div class="spinner"></div>
-<p>正在从 SocialCrawl 抓取评论...</p>
+<p>正在从 ScrapeCreators 抓取评论...</p>
 <div class="progress-bar"><div class="progress-fill" id="comment-progress" style="width:0%"></div></div>
 <p class="text-sm" id="comment-progress-text">等待开始...</p>
+<button class="btn btn-secondary" id="comment-stop-btn" onclick="stopCommentFetch()" style="margin-top:12px">⏹ 停止抓取</button>
 </div>
 <div id="comment-parts" class="hidden"></div>
 </div>
@@ -216,6 +217,7 @@ let allVideos = [];
 let currentUsername = '';
 let currentPlatform = '';
 let commentAnalysisData = null;
+let commentAbortController = null;  // For stopping comment fetch
 
 const CAT_COLORS = {
     "3C配件品牌赞助/种草":"#F8CBAD","Apple/iOS生态":"#DDEBF7","其他品牌产品种草":"#FCE4D6",
@@ -414,23 +416,35 @@ async function fetchCommentAnalysis() {
     const partsEl = document.getElementById('comment-parts');
     const progressFill = document.getElementById('comment-progress');
     const progressText = document.getElementById('comment-progress-text');
+    const stopBtn = document.getElementById('comment-stop-btn');
+
+    // Abort any existing fetch
+    if (commentAbortController) {
+        commentAbortController.abort();
+    }
+    commentAbortController = new AbortController();
 
     container.classList.remove('hidden');
     loadingEl.classList.remove('hidden');
     partsEl.classList.add('hidden');
     progressFill.style.width = '0%';
     progressText.textContent = '正在连接 ScrapeCreators...';
+    stopBtn.classList.remove('hidden');
+    stopBtn.textContent = '⏹ 停止抓取';
+    stopBtn.disabled = false;
 
     try {
         const resp = await fetch('/api/comments/analysis', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({videos: allVideos, platform: currentPlatform})
+            body: JSON.stringify({videos: allVideos, platform: currentPlatform}),
+            signal: commentAbortController.signal
         });
 
         // Simulate progress while waiting
         let progress = 0;
         const progressInterval = setInterval(() => {
+            if (commentAbortController.signal.aborted) return;
             progress = Math.min(progress + Math.random() * 8, 90);
             progressFill.style.width = progress + '%';
             progressText.textContent = `正在抓取评论... (${Math.round(progress)}%)`;
@@ -438,8 +452,12 @@ async function fetchCommentAnalysis() {
 
         const data = await resp.json();
         clearInterval(progressInterval);
+
+        if (commentAbortController.signal.aborted) return;
+
         progressFill.style.width = '100%';
         progressText.textContent = '分类完成 ✓';
+        stopBtn.classList.add('hidden');
 
         if (data.error) {
             loadingEl.innerHTML = `<div class="error-box">评论抓取失败: ${data.error}</div>`;
@@ -454,7 +472,21 @@ async function fetchCommentAnalysis() {
         }, 300);
 
     } catch(e) {
+        if (e.name === 'AbortError') {
+            loadingEl.innerHTML = `<div class="empty-state" style="padding:20px"><p>⏹ 已停止评论抓取</p><p class="text-sm">评论分析已中止</p></div>`;
+            stopBtn.classList.add('hidden');
+            return;
+        }
         loadingEl.innerHTML = `<div class="error-box">请求失败: ${e.message}</div>`;
+    }
+}
+
+function stopCommentFetch() {
+    if (commentAbortController) {
+        commentAbortController.abort();
+        commentAbortController = null;
+        document.getElementById('comment-stop-btn').textContent = '已停止';
+        document.getElementById('comment-stop-btn').disabled = true;
     }
 }
 
