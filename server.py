@@ -715,123 +715,131 @@ def api_download_excel():
 @app.route("/api/batch/analyze", methods=["POST"])
 def api_batch_analyze():
     """批量分析达人：依次检查缓存，返回哪些有缓存、哪些需要 Apify"""
-    data = request.get_json()
-    inputs = data.get("inputs", [])
-    platform = data.get("platform", "Instagram")
-    days = int(data.get("days", 30))
-    language = data.get("language", "en")
+    try:
+        data = request.get_json()
+        inputs = data.get("inputs", [])
+        platform = data.get("platform", "Instagram")
+        days = int(data.get("days", 30))
+        language = data.get("language", "en")
 
-    if not inputs:
-        return jsonify({"error": "请提供达人列表"}), 400
+        if not inputs:
+            return jsonify({"error": "请提供达人列表"}), 400
 
-    results = []
-    need_apify = []
-    cached_results = []
+        results = []
+        need_apify = []
+        cached_results = []
 
-    for inp in inputs:
-        username = extract_username(inp.strip(), platform)
-        if not username:
-            continue
+        for inp in inputs:
+            username = extract_username(inp.strip(), platform)
+            if not username:
+                continue
 
-        need_refresh, cached, msg = needs_apify_refresh(username, platform, days)
+            need_refresh, cached, msg = needs_apify_refresh(username, platform, days)
 
-        if not need_refresh and cached:
-            cached_results.append({
-                "username": username,
-                "video_count": len(cached),
-                "status": "cached",
-            })
-        else:
-            need_apify.append({
-                "username": username,
-                "cached_count": len(cached) if cached else 0,
-                "status": "need_apify",
-            })
+            if not need_refresh and cached:
+                cached_results.append({
+                    "username": username,
+                    "video_count": len(cached),
+                    "status": "cached",
+                })
+            else:
+                need_apify.append({
+                    "username": username,
+                    "cached_count": len(cached) if cached else 0,
+                    "status": "need_apify",
+                })
 
-    return jsonify({
-        "cached": cached_results,
-        "need_apify": need_apify,
-        "total": len(inputs),
-        "cached_count": len(cached_results),
-        "need_apify_count": len(need_apify),
-        "platform": platform,
-        "language": language,
-        "days": days,
-    })
+        return jsonify({
+            "cached": cached_results,
+            "need_apify": need_apify,
+            "total": len(inputs),
+            "cached_count": len(cached_results),
+            "need_apify_count": len(need_apify),
+            "platform": platform,
+            "language": language,
+            "days": days,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"批量分析检查失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
 @app.route("/api/batch/fetch", methods=["POST"])
 def api_batch_fetch():
     """批量 Apify 抓取 + 分类"""
-    data = request.get_json()
-    usernames = data.get("usernames", [])
-    platform = data.get("platform", "Instagram")
-    days = int(data.get("days", 30))
-    language = data.get("language", "en")
-    api_key = data.get("api_key", "apify_api_lNbEszC31JbjeynU2JiEVpEE4WA0JO2IyFt4")
+    try:
+        data = request.get_json()
+        usernames = data.get("usernames", [])
+        platform = data.get("platform", "Instagram")
+        days = int(data.get("days", 30))
+        language = data.get("language", "en")
+        api_key = data.get("api_key", "apify_api_lNbEszC31JbjeynU2JiEVpEE4WA0JO2IyFt4")
 
-    if not usernames:
-        return jsonify({"error": "请提供需要抓取的达人列表"}), 400
+        if not usernames:
+            return jsonify({"error": "请提供需要抓取的达人列表"}), 400
 
-    # Select classifier
-    if language == "es":
-        es_config = load_es_config()
-        classify_fn = lambda t: classify_title_es(t, es_config)
-    else:
-        en_config = load_en_config()
-        classify_fn = lambda t: classify_title_en(t, en_config)
+        # Select classifier
+        if language == "es":
+            es_config = load_es_config()
+            classify_fn = lambda t: classify_title_es(t, es_config)
+        else:
+            en_config = load_en_config()
+            classify_fn = lambda t: classify_title_en(t, en_config)
 
-    all_results = []
-    for i, username in enumerate(usernames):
-        try:
-            if "instagram" in platform.lower():
-                videos = fetch_instagram_videos(username, api_key, days)
-            else:
-                videos = fetch_tiktok_videos(username, api_key, days)
+        all_results = []
+        for i, username in enumerate(usernames):
+            try:
+                if "instagram" in platform.lower():
+                    videos = fetch_instagram_videos(username, api_key, days)
+                else:
+                    videos = fetch_tiktok_videos(username, api_key, days)
 
-            old_cached = load_cached_videos(username, platform)
-            merged = merge_videos(old_cached, videos)
-            save_cached_videos(username, platform, merged)
+                old_cached = load_cached_videos(username, platform)
+                merged = merge_videos(old_cached, videos)
+                save_cached_videos(username, platform, merged)
 
-            classified = []
-            for v in merged:
-                title = v.get("标题", v.get("title", ""))
-                brand, keywords, category, basis = classify_fn(title)
-                classified.append({
-                    "发布日期": v.get("发布日期", v.get("date", "")),
-                    "达人ID": username,
-                    "平台": platform,
-                    "标题": title,
-                    "视频链接": v.get("视频链接", v.get("url", "")),
-                    "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
-                    "分类": category,
-                    "命中品牌": brand or "",
-                    "命中关键词": keywords or "",
-                    "分类依据": basis,
+                classified = []
+                for v in merged:
+                    title = v.get("标题", v.get("title", ""))
+                    brand, keywords, category, basis = classify_fn(title)
+                    classified.append({
+                        "发布日期": v.get("发布日期", v.get("date", "")),
+                        "达人ID": username,
+                        "平台": platform,
+                        "标题": title,
+                        "视频链接": v.get("视频链接", v.get("url", "")),
+                        "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
+                        "分类": category,
+                        "命中品牌": brand or "",
+                        "命中关键词": keywords or "",
+                        "分类依据": basis,
+                    })
+
+                all_results.append({
+                    "username": username,
+                    "videos": classified,
+                    "new_count": len(videos),
+                    "total_count": len(merged),
+                    "status": "ok",
+                })
+            except Exception as e:
+                all_results.append({
+                    "username": username,
+                    "videos": [],
+                    "status": "error",
+                    "error": str(e),
                 })
 
-            all_results.append({
-                "username": username,
-                "videos": classified,
-                "new_count": len(videos),
-                "total_count": len(merged),
-                "status": "ok",
-            })
-        except Exception as e:
-            all_results.append({
-                "username": username,
-                "videos": [],
-                "status": "error",
-                "error": str(e),
-            })
-
-    return jsonify({
-        "results": all_results,
-        "platform": platform,
-        "language": language,
-        "total_done": len([r for r in all_results if r["status"] == "ok"]),
-        "total_error": len([r for r in all_results if r["status"] == "error"]),
-    })
+        return jsonify({
+            "results": all_results,
+            "platform": platform,
+            "language": language,
+            "total_done": len([r for r in all_results if r["status"] == "ok"]),
+            "total_error": len([r for r in all_results if r["status"] == "error"]),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"批量抓取失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
 if __name__ == "__main__":
