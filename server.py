@@ -151,6 +151,16 @@ def extract_username(text, platform):
     return text.replace("@", "").split("/")[0].split("?")[0].strip()
 
 
+@app.route("/health")
+def health():
+    """Health check + version info"""
+    return jsonify({
+        "status": "ok",
+        "version": "3.1",
+        "features": ["batch_analyze", "batch_fetch", "comment_stop", "batch_stop"]
+    })
+
+
 @app.route("/")
 def index():
     """Serve the main page"""
