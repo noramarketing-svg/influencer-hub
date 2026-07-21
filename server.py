@@ -761,12 +761,14 @@ def _run_batch_views(task_id, urls, excel_path=None):
     results = []
     for i, url in enumerate(urls):
         _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{len(urls)}..."}
-        url = _normalize_url(url)
-        platform = _detect_platform(url)
+        original_url = url  # 保留原始 URL
+        normalized = _normalize_url(url)
+        platform = _detect_platform(normalized)
         try:
-            meta = _fetch_video_metadata_sc(url, platform)
+            meta = _fetch_video_metadata_sc(normalized, platform)
             results.append({
-                "url": url,
+                "url": original_url,
+                "normalized_url": normalized,
                 "platform": platform,
                 "author": meta.get("author"),
                 "title": meta.get("title", "")[:120],
@@ -775,7 +777,7 @@ def _run_batch_views(task_id, urls, excel_path=None):
                 "comments": meta.get("comments"),
             })
         except Exception as e:
-            results.append({"url": url, "platform": platform, "error": str(e)})
+            results.append({"url": original_url, "normalized_url": normalized, "platform": platform, "error": str(e)})
 
     result_data = {"videos": results, "total": len(results)}
 
@@ -791,23 +793,44 @@ def _run_batch_views(task_id, urls, excel_path=None):
     _async_tasks[task_id] = {"status": "done", "result": result_data}
 
 
+def _normalize_for_match(url):
+    """宽松匹配：提取 URL 中的关键标识部分"""
+    if not url:
+        return ""
+    url = url.strip()
+    # 去掉末尾斜杠、query 参数
+    if '?' in url:
+        url = url.split('?')[0]
+    url = url.rstrip('/')
+    # Instagram: /reels/ 和 /reel/ 统一
+    url = url.replace('/reels/', '/reel/').replace('/p/', '/reel/')
+    return url.lower()
+
+
 def _fill_views_to_excel(tmp_path, results):
-    """回填 View 到原 Excel，保留原格式，生成下载文件"""
+    """回填 View 到原 Excel，保留原格式，TK 和 IG 分列"""
     from openpyxl import load_workbook
-    from openpyxl.styles import numbers
 
     wb = load_workbook(tmp_path, data_only=True)
     ws = wb.active
 
-    # 构建 url → views 映射
-    view_map = {}
+    # 构建原始 URL → 结果映射，同时处理规范化匹配
+    # key: 规范化后的 URL, value: views
+    tk_map = {}
+    ig_map = {}
     for r in results:
         u = r.get("url", "")
+        nu = _normalize_for_match(u)
         v = r.get("views")
-        if u and v is not None:
-            view_map[u] = v
+        p = (r.get("platform") or "").lower()
+        if not nu:
+            continue
+        if "instagram" in p:
+            ig_map[nu] = v if v is not None else None
+        else:
+            tk_map[nu] = v if v is not None else None
 
-    # 找表头
+    # 找 URL 列
     headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
     url_col = None
     for i, h in enumerate(headers):
@@ -816,13 +839,11 @@ def _fill_views_to_excel(tmp_path, results):
             break
 
     if url_col is None:
-        # 无表头，扫描找链接列
         for col_idx in range(1, ws.max_column + 1):
-            cell_val = str(ws.cell(row=1, column=col_idx).value or '')
             for row_idx in range(2, min(ws.max_row + 1, 5)):
                 val = str(ws.cell(row=row_idx, column=col_idx).value or '')
                 if 'tiktok.com' in val or 'instagram.com' in val:
-                    url_col = col_idx - 1  # 0-based
+                    url_col = col_idx - 1
                     break
             if url_col is not None:
                 break
@@ -830,21 +851,50 @@ def _fill_views_to_excel(tmp_path, results):
     if url_col is None:
         raise Exception("无法在 Excel 中定位 URL 列，无法回填")
 
-    # 找到或创建 View 列（在 URL 列右侧）
-    view_col_idx = url_col + 1  # 1-based
-    # 检查 URL 列右边第一列是不是 "view" / "播放量" / "views"
-    header_right = str(ws.cell(row=1, column=view_col_idx + 1).value or '').strip().lower()
-    if header_right in ['view', 'views', '播放量', '播放', 'view_count', '视频播放量']:
-        view_col_idx = view_col_idx + 1
+    # 确定 TK View 和 IG View 列位置
+    # 先扫描现有表头看是否已有 View 列
+    tk_view_col = None
+    ig_view_col = None
+    for i, h in enumerate(headers):
+        if h in ['tt view', 'tk view', 'tiktok view', 'tk播放量', 'tt播放量']:
+            tk_view_col = i
+        if h in ['ig view', 'ig播放量', 'ig 播放量', 'instagram view']:
+            ig_view_col = i
 
-    # 设置/覆盖 View 列表头
-    ws.cell(row=1, column=view_col_idx + 1).value = 'View'
+    # 如果没有，在表格最右边追加两列（不覆盖原有数据）
+    max_col = ws.max_column
+    if tk_view_col is None:
+        tk_view_col = max_col
+        max_col += 1
+        ws.cell(row=1, column=tk_view_col + 1).value = 'TK View'
+    if ig_view_col is None:
+        ig_view_col = max_col
+        max_col += 1
+        ws.cell(row=1, column=ig_view_col + 1).value = 'IG View'
 
-    # 回填 View 数据
+    # 回填数据
     for row_idx in range(2, ws.max_row + 1):
         cell_val = str(ws.cell(row=row_idx, column=url_col + 1).value or '').strip()
-        if cell_val in view_map:
-            ws.cell(row=row_idx, column=view_col_idx + 1).value = view_map[cell_val]
+        if not cell_val:
+            continue
+        match_key = _normalize_for_match(cell_val)
+
+        # 判断平台并回填对应列
+        if 'instagram.com' in match_key:
+            if match_key in ig_map:
+                ws.cell(row=row_idx, column=ig_view_col + 1).value = ig_map[match_key]
+        elif 'tiktok.com' in match_key:
+            if match_key in tk_map:
+                ws.cell(row=row_idx, column=tk_view_col + 1).value = tk_map[match_key]
+
+    # 保存
+    download_dir = os.path.join(BASE_DIR, "downloads")
+    os.makedirs(download_dir, exist_ok=True)
+    output_name = f"view_update_{uuid.uuid4().hex[:8]}.xlsx"
+    output_path = os.path.join(download_dir, output_name)
+    wb.save(output_path)
+
+    return f"/downloads/{output_name}"
 
     # 保存到可下载位置
     download_dir = os.path.join(BASE_DIR, "downloads")
