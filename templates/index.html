@@ -619,17 +619,27 @@ function showUploadInput() {
     document.getElementById('upload-input-area').classList.toggle('hidden');
 }
 
+let apifyAbortController = null;  // For stopping Apify fetch
+
 async function triggerApifyAuto() {
     const status = document.getElementById('status');
     const btn = document.getElementById('analyze-btn');
     btn.disabled = true;
     status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在通过 Apify 抓取最新数据（自动去重合并）...';
 
+    // 显示停止按钮
+    const stopBtn = document.getElementById('apify-stop-btn');
+    if (stopBtn) stopBtn.classList.remove('hidden');
+
+    apifyAbortController = new AbortController();
+    const startTime = Date.now();
+
     try {
         // Step 1: 启动异步任务（立即返回 task_id）
         const resp = await fetch('/api/apify/fetch', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
+            signal: apifyAbortController.signal,
             body: JSON.stringify({
                 username: currentUsername,
                 platform: currentPlatform,
@@ -638,6 +648,7 @@ async function triggerApifyAuto() {
                 language: document.getElementById('language').value
             })
         });
+        if (apifyAbortController.signal.aborted) return;
         const initData = await resp.json();
         if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
 
@@ -647,14 +658,16 @@ async function triggerApifyAuto() {
         while (true) {
             await new Promise(r => setTimeout(r, 3000));
             elapsed += 3;
-            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Apify 抓取中... (已等待 ${elapsed}s)`;
-            const pollResp = await fetch('/api/apify/status/' + taskId);
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Apify 抓取中... (已等待 ${elapsed}s) <button class="btn btn-secondary" style="margin-left:8px;padding:4px 8px;font-size:12px" onclick="stopApifyFetch()">停止</button>`;
+            const pollResp = await fetch('/api/apify/status/' + taskId, {signal: apifyAbortController.signal});
+            if (apifyAbortController.signal.aborted) return;
             const pollData = await pollResp.json();
             if (pollData.status === 'done') {
+                const costSec = Math.round((Date.now() - startTime) / 1000);
                 allVideos = pollData.result.videos || [];
                 renderTopicAndVideos();
                 document.getElementById('results-area').classList.remove('hidden');
-                status.innerHTML = `<span class="ok">✅ ${pollData.result.message}</span>`;
+                status.innerHTML = `<span class="ok">✅ ${pollData.result.message}（耗时 ${costSec}s）</span>`;
                 await fetchCommentAnalysis();
                 break;
             } else if (pollData.status === 'error') {
@@ -668,9 +681,22 @@ async function triggerApifyAuto() {
             }
         }
     } catch(e) {
-        status.innerHTML = `<span class="error">Apify 请求失败: ${e.message}</span>`;
+        if (apifyAbortController.signal.aborted) {
+            status.innerHTML = '<span class="error">Apify 抓取已停止</span>';
+        } else {
+            status.innerHTML = `<span class="error">Apify 请求失败: ${e.message}</span>`;
+        }
     } finally {
         btn.disabled = false;
+        if (stopBtn) stopBtn.classList.add('hidden');
+        apifyAbortController = null;
+    }
+}
+
+function stopApifyFetch() {
+    if (apifyAbortController) {
+        apifyAbortController.abort();
+        apifyAbortController = null;
     }
 }
 
