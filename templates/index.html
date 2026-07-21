@@ -626,6 +626,7 @@ async function triggerApifyAuto() {
     status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在通过 Apify 抓取最新数据（自动去重合并）...';
 
     try {
+        // Step 1: 启动异步任务（立即返回 task_id）
         const resp = await fetch('/api/apify/fetch', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -637,14 +638,35 @@ async function triggerApifyAuto() {
                 language: document.getElementById('language').value
             })
         });
-        const data = await resp.json();
-        if (data.error) { status.innerHTML = `<span class="error">${data.error}</span>`; btn.disabled = false; return; }
+        const initData = await resp.json();
+        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
 
-        allVideos = data.videos || [];
-        renderTopicAndVideos();
-        document.getElementById('results-area').classList.remove('hidden');
-        status.innerHTML = `<span class="ok">✅ ${data.message}</span>`;
-        await fetchCommentAnalysis();
+        const taskId = initData.task_id;
+        // Step 2: 每 3 秒轮询状态（每次请求 <2s，永不超时）
+        let elapsed = 0;
+        while (true) {
+            await new Promise(r => setTimeout(r, 3000));
+            elapsed += 3;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> Apify 抓取中... (已等待 ${elapsed}s)`;
+            const pollResp = await fetch('/api/apify/status/' + taskId);
+            const pollData = await pollResp.json();
+            if (pollData.status === 'done') {
+                allVideos = pollData.result.videos || [];
+                renderTopicAndVideos();
+                document.getElementById('results-area').classList.remove('hidden');
+                status.innerHTML = `<span class="ok">✅ ${pollData.result.message}</span>`;
+                await fetchCommentAnalysis();
+                break;
+            } else if (pollData.status === 'error') {
+                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                break;
+            }
+            // status === 'started' or 'running' → continue polling
+            if (elapsed > 120) {
+                status.innerHTML = '<span class="error">抓取超时（>120s），请重试</span>';
+                break;
+            }
+        }
     } catch(e) {
         status.innerHTML = `<span class="error">Apify 请求失败: ${e.message}</span>`;
     } finally {

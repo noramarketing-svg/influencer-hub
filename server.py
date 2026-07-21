@@ -4,11 +4,14 @@
 参考旧版排版，支持任意达人输入
 数据流: Apify(标题) + SocialCrawl(评论) → english_classifier + comment_analyzer → 前端
 """
-import json, os, re, sys, time, hashlib, threading
+import json, os, re, sys, time, hashlib, threading, uuid
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_from_directory
+
+# 异步任务存储（内存字典）
+_async_tasks = {}  # {task_id: {status, result, error, ...}}
 
 app = Flask(__name__)
 
@@ -476,35 +479,23 @@ def _calc_purchase_intent(classified_comments, config):
 
 
 # ============================================================
-# API: Apify fetch (placeholder — needs user's API key)
+# API: Apify fetch — 异步模式（绕过 Render 30s 限制）
 # ============================================================
-@app.route("/api/apify/fetch", methods=["POST"])
-def api_apify_fetch():
-    """Trigger Apify scraping for a given influencer"""
-    data = request.get_json()
-    username = data.get("username", "")
-    platform = data.get("platform", "Instagram")
-    days = int(data.get("days", 30))
-    api_key = data.get("api_key", "")
-    language = data.get("language", "en")
-
-    if not api_key:
-        return jsonify({"error": "请提供 Apify API Key"}), 400
-
-    # Apify fetcher already imported at top level
-
+def _run_apify_async(task_id, username, platform, days, api_key, language):
+    """后台线程：执行 Apify 抓取 + 分类 + 缓存"""
     try:
+        _async_tasks[task_id]["status"] = "running"
         if "instagram" in platform.lower():
             videos = fetch_instagram_videos(username, api_key, days)
         else:
             videos = fetch_tiktok_videos(username, api_key, days)
 
-        # 增量合并：与旧缓存去重，新数据覆盖旧数据
+        # 增量合并
         old_cached = load_cached_videos(username, platform)
         merged = merge_videos(old_cached, videos)
         save_cached_videos(username, platform, merged)
 
-        # Select classifier
+        # 分类
         if language == "es":
             es_config = load_es_config()
             classify_fn = lambda t: classify_title_es(t, es_config)
@@ -512,7 +503,6 @@ def api_apify_fetch():
             en_config = load_en_config()
             classify_fn = lambda t: classify_title_en(t, en_config)
 
-        # Classify
         results = []
         for v in merged:
             title = v.get("标题", v.get("title", ""))
@@ -532,13 +522,58 @@ def api_apify_fetch():
 
         new_count = len(videos)
         total_count = len(merged)
-        return jsonify({
-            "username": username, "platform": platform,
-            "videos": results, "source": "apify",
-            "message": f"Apify 抓取完成: 新增 {new_count} 条，总计 {total_count} 条（已去重合并）"
-        })
+        _async_tasks[task_id] = {
+            "status": "done",
+            "result": {
+                "username": username, "platform": platform,
+                "videos": results, "source": "apify",
+                "message": f"Apify 抓取完成: 新增 {new_count} 条，总计 {total_count} 条（已去重合并）"
+            }
+        }
     except Exception as e:
-        return jsonify({"error": f"Apify 抓取失败: {str(e)}"}), 500
+        import traceback
+        _async_tasks[task_id] = {
+            "status": "error",
+            "error": f"Apify 抓取失败: {str(e)}",
+            "trace": traceback.format_exc()
+        }
+
+
+@app.route("/api/apify/fetch", methods=["POST"])
+def api_apify_fetch():
+    """触发 Apify 异步抓取（立即返回 task_id，前端轮询状态）"""
+    data = request.get_json()
+    username = data.get("username", "")
+    platform = data.get("platform", "Instagram")
+    days = int(data.get("days", 30))
+    api_key = data.get("api_key", "")
+    language = data.get("language", "en")
+
+    if not api_key:
+        return jsonify({"error": "请提供 Apify API Key"}), 400
+
+    task_id = str(uuid.uuid4())[:8]
+    _async_tasks[task_id] = {"status": "started"}
+
+    t = threading.Thread(target=_run_apify_async, args=(task_id, username, platform, days, api_key, language))
+    t.daemon = True
+    t.start()
+
+    return jsonify({"task_id": task_id, "status": "started"})
+
+
+@app.route("/api/apify/status/<task_id>", methods=["GET"])
+def api_apify_status(task_id):
+    """轮询异步任务状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
+    resp = {"status": task["status"]}
+    if task["status"] == "done":
+        resp["result"] = task["result"]
+    elif task["status"] == "error":
+        resp["error"] = task.get("error", "未知错误")
+    return jsonify(resp)
 
 
 # ============================================================
