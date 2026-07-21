@@ -140,6 +140,20 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 .meta-item{background:#f8fafc;border-radius:8px;padding:12px;text-align:center}
 .meta-item .num{font-size:20px;font-weight:700;color:#4472C4}
 .meta-item .label{font-size:12px;color:#64748b}
+
+/* Modal */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-overlay.hidden{display:none}
+.modal{background:#fff;border-radius:12px;padding:24px;width:90%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.modal h2{margin-bottom:16px;font-size:18px}
+.modal .input-group{margin-bottom:16px}
+.modal .input-group label{font-size:13px;font-weight:600;color:#64748b;display:block;margin-bottom:4px}
+.modal .input-group input{width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px}
+.modal .input-group .hint{font-size:12px;color:#94a3b8;margin-top:4px}
+.modal-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:20px}
+.key-status{font-size:12px;padding:4px 8px;border-radius:4px;display:inline-block;margin-left:8px}
+.key-status.ok{background:#d1fae5;color:#065f46}
+.key-status.missing{background:#fee2e2;color:#991b1b}
 </style>
 </head>
 <body>
@@ -157,6 +171,11 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
     <button class="nav-btn" id="nav-3" onclick="switchPanel(3)">
         <span>3</span> 数据更新入口
     </button>
+    <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0">
+        <button class="nav-btn" onclick="openSettingsModal()" style="color:#64748b">
+            <span>⚙️</span> API 设置
+        </button>
+    </div>
 </aside>
 
 <!-- Main Content -->
@@ -292,6 +311,37 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 </div>
 
 </main>
+</div>
+
+<!-- API Settings Modal -->
+<div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal">
+        <h2>⚙️ API Key 设置</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">当某个 API 额度用完时，在此处输入新 Key 即可自动更新。Key 会保存在服务器上。</p>
+
+        <div class="input-group">
+            <label>ScrapeCreators API Key <span id="sc-status" class="key-status missing">未设置</span></label>
+            <input type="text" id="sc-key-input" placeholder="粘贴 ScrapeCreators API Key">
+            <div class="hint">用于视频数据、口播转录、评论抓取</div>
+        </div>
+
+        <div class="input-group">
+            <label>Apify API Key <span id="apify-status" class="key-status missing">未设置</span></label>
+            <input type="text" id="apify-key-input" placeholder="粘贴 Apify API Key">
+            <div class="hint">用于抓取达人视频列表</div>
+        </div>
+
+        <div class="input-group">
+            <label>DeepSeek API Key <span id="deepseek-status" class="key-status missing">未设置</span></label>
+            <input type="text" id="deepseek-key-input" placeholder="粘贴 DeepSeek API Key">
+            <div class="hint">用于 AI 内容拆解</div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeSettingsModal()">取消</button>
+            <button class="btn" onclick="saveApiKeys()">保存并更新</button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -726,13 +776,12 @@ async function triggerApifyAuto() {
                 username: currentUsername,
                 platform: currentPlatform,
                 days: parseInt(document.getElementById('fetch-days').value),
-                api_key: 'apify_api_E63BmYZ9pDoU6goXDOr7JCDasZkAgg00v7ZL',
                 language: document.getElementById('language').value
             })
         });
         if (apifyAbortController.signal.aborted) return;
         const initData = await resp.json();
-        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
+        if (initData.error) { renderError('status', initData.error, 'Apify'); btn.disabled = false; return; }
 
         const taskId = initData.task_id;
         // Step 2: 每 3 秒轮询状态（每次请求 <2s，永不超时）
@@ -753,7 +802,7 @@ async function triggerApifyAuto() {
                 await fetchCommentAnalysis();
                 break;
             } else if (pollData.status === 'error') {
-                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                renderError('status', pollData.error, 'Apify');
                 break;
             }
             // status === 'started' or 'running' → continue polling
@@ -1032,7 +1081,7 @@ async function analyzeSingleVideo() {
             body: JSON.stringify({url, platform, language})
         });
         const initData = await resp.json();
-        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
+        if (initData.error) { renderError('video-status', initData.error, 'ScrapeCreators'); btn.disabled = false; return; }
 
         const taskId = initData.task_id;
         let elapsed = 0;
@@ -1051,7 +1100,7 @@ async function analyzeSingleVideo() {
                 resultsArea.classList.remove('hidden');
                 break;
             } else if (pollData.status === 'error') {
-                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                renderError('video-status', pollData.error, 'ScrapeCreators');
                 break;
             }
             if (elapsed > 180) {
@@ -1185,7 +1234,7 @@ async function uploadViewsExcel() {
             signal: viewsAbortController.signal
         });
         const initData = await resp.json();
-        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
+        if (initData.error) { renderError('views-status', initData.error, 'ScrapeCreators'); btn.disabled = false; return; }
 
         const taskId = initData.task_id;
         const total = initData.total || 0;
@@ -1205,7 +1254,7 @@ async function uploadViewsExcel() {
                 resultsArea.classList.remove('hidden');
                 break;
             } else if (pollData.status === 'error') {
-                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                renderError('views-status', pollData.error, 'ScrapeCreators');
                 break;
             }
             if (elapsed > 300) {
@@ -1253,10 +1302,94 @@ function renderViewsResults(result) {
     container.innerHTML = html;
 }
 
+// ============ API Key Management ============
+let apiKeyStatus = {};
+
+async function loadApiKeyStatus() {
+    try {
+        const resp = await fetch('/api/config/keys');
+        apiKeyStatus = await resp.json();
+        updateSettingsUI();
+    } catch(e) { console.error('load keys failed', e); }
+}
+
+function updateSettingsUI() {
+    const setStatus = (id, info) => {
+        const el = document.getElementById(id);
+        if (!el || !info) return;
+        el.textContent = info.set ? `已设置 (${info.masked})` : '未设置';
+        el.className = 'key-status ' + (info.set ? 'ok' : 'missing');
+    };
+    setStatus('sc-status', apiKeyStatus.scrapecreators);
+    setStatus('apify-status', apiKeyStatus.apify);
+    setStatus('deepseek-status', apiKeyStatus.deepseek);
+}
+
+function openSettingsModal() {
+    loadApiKeyStatus();
+    document.getElementById('settings-modal').classList.remove('hidden');
+}
+
+function closeSettingsModal() {
+    document.getElementById('settings-modal').classList.add('hidden');
+}
+
+async function saveApiKeys() {
+    const scKey = document.getElementById('sc-key-input').value.trim();
+    const apifyKey = document.getElementById('apify-key-input').value.trim();
+    const deepseekKey = document.getElementById('deepseek-key-input').value.trim();
+
+    const saveOne = async (endpoint, key) => {
+        if (!key) return null;
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key})
+        });
+        return resp.json();
+    };
+
+    try {
+        await Promise.all([
+            scKey ? saveOne('/api/config/scrapecreators-key', scKey) : null,
+            apifyKey ? saveOne('/api/config/apify-key', apifyKey) : null,
+            deepseekKey ? saveOne('/api/config/deepseek-key', deepseekKey) : null,
+        ]);
+        await loadApiKeyStatus();
+        alert('API Key 已更新');
+        document.getElementById('sc-key-input').value = '';
+        document.getElementById('apify-key-input').value = '';
+        document.getElementById('deepseek-key-input').value = '';
+        closeSettingsModal();
+    } catch(e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+// 检测错误是否是额度耗尽
+function isCreditError(errText) {
+    if (!errText) return false;
+    const t = errText.toLowerCase();
+    return t.includes('out of credits') || t.includes('not-enough-usage') || t.includes('额度') || t.includes('402');
+}
+
+// 统一显示错误，自动识别额度耗尽并给出设置入口
+function renderError(containerId, message, serviceName) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    if (isCreditError(message)) {
+        container.innerHTML = `<span class="error">${serviceName || 'API'} 额度已用完：${escHtml(message)}</span> 
+            <button class="btn" style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="openSettingsModal()">⚙️ 输入新 Key</button>`;
+    } else {
+        container.innerHTML = `<span class="error">${escHtml(message)}</span>`;
+    }
+}
+
 // ============ Init ============
 // Page loads with empty state — user must input influencer
 document.getElementById('results-area').classList.add('hidden');
 switchPanel(1);
+loadApiKeyStatus();
 </script>
 </body>
 </html>

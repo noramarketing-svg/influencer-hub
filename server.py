@@ -15,11 +15,28 @@ from openai import OpenAI
 # 异步任务存储（内存字典）
 _async_tasks = {}  # {task_id: {status, result, error, ...}}
 
-# DeepSeek 配置
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-022e1d49363743c786043907dad15a98")
-DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
-SC_API_KEY = "YhZY3Y5FfGSom6oKq4MRmtFrWrI2"
-SC_HEADERS = {"x-api-key": SC_API_KEY}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(BASE_DIR, "configs"))
+import api_keys as _api_keys
+
+def reload_api_keys():
+    """重新加载 configs/api_keys.py"""
+    import importlib
+    importlib.reload(_api_keys)
+    global SC_API_KEY, SC_HEADERS, DEEPSEEK_API_KEY, DEEPSEEK_CLIENT, APIFY_API_KEY
+    SC_API_KEY = getattr(_api_keys, "SCRAPECREATORS_API_KEY", "")
+    SC_HEADERS = {"x-api-key": SC_API_KEY}
+    DEEPSEEK_API_KEY = getattr(_api_keys, "DEEPSEEK_API_KEY", "")
+    DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
+    APIFY_API_KEY = getattr(_api_keys, "APIFY_API_KEY", "")
+    # 同步更新 engine 模块中的 Key
+    try:
+        import socialcrawl_fetcher
+        socialcrawl_fetcher.SCRAPECREATORS_API_KEY = SC_API_KEY
+    except Exception:
+        pass
+
+reload_api_keys()
 
 app = Flask(__name__)
 
@@ -894,7 +911,7 @@ def api_apify_fetch():
     username = data.get("username", "")
     platform = data.get("platform", "Instagram")
     days = int(data.get("days", 30))
-    api_key = data.get("api_key", "")
+    api_key = data.get("api_key") or APIFY_API_KEY
     language = data.get("language", "en")
 
     if not api_key:
@@ -922,6 +939,81 @@ def api_apify_status(task_id):
     elif task["status"] == "error":
         resp["error"] = task.get("error", "未知错误")
     return jsonify(resp)
+
+
+# ============================================================
+# API: API Key 管理
+# ============================================================
+def _mask_key(key):
+    if not key or len(key) < 8:
+        return "未设置"
+    return "****" + key[-4:]
+
+
+@app.route("/api/config/keys", methods=["GET"])
+def api_config_keys():
+    """获取当前 API Key 状态（掩码显示）"""
+    reload_api_keys()
+    return jsonify({
+        "apify": {"set": bool(APIFY_API_KEY), "masked": _mask_key(APIFY_API_KEY)},
+        "scrapecreators": {"set": bool(SC_API_KEY), "masked": _mask_key(SC_API_KEY)},
+        "deepseek": {"set": bool(DEEPSEEK_API_KEY), "masked": _mask_key(DEEPSEEK_API_KEY)},
+    })
+
+
+@app.route("/api/config/apify-key", methods=["POST"])
+def api_config_apify_key():
+    """更新 Apify API Key"""
+    data = request.get_json()
+    key = data.get("key", "").strip()
+    if not key:
+        return jsonify({"error": "Key 不能为空"}), 400
+    _update_config_key("APIFY_API_KEY", key)
+    reload_api_keys()
+    return jsonify({"ok": True, "masked": _mask_key(key)})
+
+
+@app.route("/api/config/scrapecreators-key", methods=["POST"])
+def api_config_scrapecreators_key():
+    """更新 ScrapeCreators API Key"""
+    data = request.get_json()
+    key = data.get("key", "").strip()
+    if not key:
+        return jsonify({"error": "Key 不能为空"}), 400
+    _update_config_key("SCRAPECREATORS_API_KEY", key)
+    reload_api_keys()
+    return jsonify({"ok": True, "masked": _mask_key(key)})
+
+
+@app.route("/api/config/deepseek-key", methods=["POST"])
+def api_config_deepseek_key():
+    """更新 DeepSeek API Key"""
+    data = request.get_json()
+    key = data.get("key", "").strip()
+    if not key:
+        return jsonify({"error": "Key 不能为空"}), 400
+    _update_config_key("DEEPSEEK_API_KEY", key)
+    reload_api_keys()
+    return jsonify({"ok": True, "masked": _mask_key(key)})
+
+
+def _update_config_key(var_name, new_value):
+    """更新 configs/api_keys.py 中的变量值"""
+    config_path = os.path.join(BASE_DIR, "configs", "api_keys.py")
+    with open(config_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 替换形如 VAR_NAME = "..." 的行
+    import re
+    pattern = re.compile(rf'^{var_name}\s*=\s*"[^"]*"', re.MULTILINE)
+    replacement = f'{var_name} = "{new_value}"'
+    if pattern.search(content):
+        content = pattern.sub(replacement, content)
+    else:
+        content += f"\n{replacement}\n"
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
 
 # ============================================================
@@ -1201,7 +1293,7 @@ def api_batch_fetch():
         platform = data.get("platform", "Instagram")
         days = int(data.get("days", 30))
         language = data.get("language", "en")
-        api_key = data.get("api_key", "apify_api_lNbEszC31JbjeynU2JiEVpEE4WA0JO2IyFt4")
+        api_key = data.get("api_key") or APIFY_API_KEY
 
         if not usernames:
             return jsonify({"error": "请提供需要抓取的达人列表"}), 400

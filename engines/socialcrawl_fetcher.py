@@ -18,12 +18,19 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(SCRIPT_DIR, "..", "cache")
 COMMENT_CACHE_PATH = os.path.join(CACHE_DIR, "socialcrawl_comments.json")
 
+# 尝试从 configs/api_keys.py 读取最新 Key（server.py 会动态更新）
+try:
+    import api_keys as _api_keys
+    _SCRAPECREATORS_API_KEY = getattr(_api_keys, "SCRAPECREATORS_API_KEY", "")
+except Exception:
+    _SCRAPECREATORS_API_KEY = ""
+
 # API Config
 SOCIALCRAWL_API_KEY = os.environ.get(
     "SOCIALCRAWL_API_KEY",
     "sc_gPSfSMPuVBeP6Bp8IQEDoZ3fXTEQrTmEneNE8mupZSc"
 )
-SCRAPECREATORS_API_KEY = os.environ.get(
+SCRAPECREATORS_API_KEY = _SCRAPECREATORS_API_KEY or os.environ.get(
     "SCRAPECREATORS_API_KEY",
     "YhZY3Y5FfGSom6oKq4MRmtFrWrI2"
 )
