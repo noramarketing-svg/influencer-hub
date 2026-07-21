@@ -780,7 +780,7 @@ def api_download_excel():
     output.seek(0)
 
     from flask import send_file
-    filename = f"达人分析_{username}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    filename = f"达人分析_{username}_{platform}_{datetime.now().strftime('%Y%m%d')}.xlsx"
     return send_file(
         output,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
