@@ -419,7 +419,7 @@ async function fetchCommentAnalysis() {
     loadingEl.classList.remove('hidden');
     partsEl.classList.add('hidden');
     progressFill.style.width = '0%';
-    progressText.textContent = '正在连接 SocialCrawl...';
+    progressText.textContent = '正在连接 ScrapeCreators...';
 
     try {
         const resp = await fetch('/api/comments/analysis', {
