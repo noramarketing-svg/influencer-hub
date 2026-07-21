@@ -793,18 +793,20 @@ def _run_batch_views(task_id, urls, excel_path=None):
     _async_tasks[task_id] = {"status": "done", "result": result_data}
 
 
-def _normalize_for_match(url):
-    """宽松匹配：提取 URL 中的关键标识部分"""
+def _extract_video_id(url):
+    """从 URL 中提取视频唯一标识（shortcode / video ID），用于可靠匹配"""
     if not url:
         return ""
-    url = url.strip()
-    # 去掉末尾斜杠、query 参数
-    if '?' in url:
-        url = url.split('?')[0]
-    url = url.rstrip('/')
-    # Instagram: /reels/ 和 /reel/ 统一
-    url = url.replace('/reels/', '/reel/').replace('/p/', '/reel/')
-    return url.lower()
+    url = str(url).strip()
+    # Instagram: /reel/SHORTCODE/ 或 /reels/SHORTCODE/ 或 /p/SHORTCODE/
+    ig_match = re.search(r'instagram\.com/(?:reel|reels|p)/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
+    if ig_match:
+        return f"IG_{ig_match.group(1)}"
+    # TikTok: /video/1234567890123456789
+    tk_match = re.search(r'tiktok\.com/[^/]+/video/(\d+)', url, re.IGNORECASE)
+    if tk_match:
+        return f"TK_{tk_match.group(1)}"
+    return ""
 
 
 def _fill_views_to_excel(tmp_path, results):
@@ -814,25 +816,21 @@ def _fill_views_to_excel(tmp_path, results):
     wb = load_workbook(tmp_path, data_only=True)
     ws = wb.active
 
-    # 构建原始 URL → 结果映射，同时处理规范化匹配
-    # key: 规范化后的 URL, value: {views, error}
-    tk_map = {}
-    ig_map = {}
+    # 用视频 ID 作为 key 构建映射，比 URL 全文匹配可靠得多
+    tk_map = {}  # key: TK_<video_id>
+    ig_map = {}  # key: IG_<shortcode>
     for r in results:
-        u = r.get("url", "")
-        nu = _normalize_for_match(u)
-        v = r.get("views")
-        p = (r.get("platform") or "").lower()
-        err = r.get("error")
-        if not nu:
+        u = r.get("url", "") or r.get("normalized_url", "")
+        vid = _extract_video_id(u)
+        if not vid:
             continue
-        entry = {"views": v, "error": err}
-        if "instagram" in p:
-            ig_map[nu] = entry
+        entry = {"views": r.get("views"), "error": r.get("error")}
+        if vid.startswith("IG_"):
+            ig_map[vid] = entry
         else:
-            tk_map[nu] = entry
+            tk_map[vid] = entry
 
-    # 找 URL 列
+    # 找 URL 列：先找表头，再扫描内容
     headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
     url_col = None
     for i, h in enumerate(headers):
@@ -842,9 +840,9 @@ def _fill_views_to_excel(tmp_path, results):
 
     if url_col is None:
         for col_idx in range(1, ws.max_column + 1):
-            for row_idx in range(2, min(ws.max_row + 1, 5)):
+            for row_idx in range(1, min(ws.max_row + 1, 6)):
                 val = str(ws.cell(row=row_idx, column=col_idx).value or '')
-                if 'tiktok.com' in val or 'instagram.com' in val:
+                if 'tiktok.com' in val.lower() or 'instagram.com' in val.lower():
                     url_col = col_idx - 1
                     break
             if url_col is not None:
@@ -854,7 +852,6 @@ def _fill_views_to_excel(tmp_path, results):
         raise Exception("无法在 Excel 中定位 URL 列，无法回填")
 
     # 确定 TK View 和 IG View 列位置
-    # 先扫描现有表头看是否已有 View 列
     tk_view_col = None
     ig_view_col = None
     for i, h in enumerate(headers):
@@ -863,7 +860,7 @@ def _fill_views_to_excel(tmp_path, results):
         if h in ['ig view', 'ig播放量', 'ig 播放量', 'instagram view']:
             ig_view_col = i
 
-    # 如果没有，在表格最右边追加两列（不覆盖原有数据）
+    # 如果没有，在表格最右边追加两列
     max_col = ws.max_column
     if tk_view_col is None:
         tk_view_col = max_col
@@ -874,23 +871,24 @@ def _fill_views_to_excel(tmp_path, results):
         max_col += 1
         ws.cell(row=1, column=ig_view_col + 1).value = 'IG View'
 
-    # 回填数据
+    # 回填数据：用视频 ID 匹配，不依赖 URL 全文
     for row_idx in range(2, ws.max_row + 1):
         cell_val = str(ws.cell(row=row_idx, column=url_col + 1).value or '').strip()
         if not cell_val:
             continue
-        match_key = _normalize_for_match(cell_val)
+        vid = _extract_video_id(cell_val)
+        if not vid:
+            continue
 
-        # 判断平台并回填对应列
-        if 'instagram.com' in match_key:
-            entry = ig_map.get(match_key)
+        if vid.startswith("IG_"):
+            entry = ig_map.get(vid)
             if entry:
                 if entry.get("views") is not None:
                     ws.cell(row=row_idx, column=ig_view_col + 1).value = entry["views"]
                 elif entry.get("error"):
                     ws.cell(row=row_idx, column=ig_view_col + 1).value = f"失败: {entry['error'][:30]}"
-        elif 'tiktok.com' in match_key:
-            entry = tk_map.get(match_key)
+        elif vid.startswith("TK_"):
+            entry = tk_map.get(vid)
             if entry:
                 if entry.get("views") is not None:
                     ws.cell(row=row_idx, column=tk_view_col + 1).value = entry["views"]
