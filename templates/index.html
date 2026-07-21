@@ -1298,8 +1298,44 @@ function renderViewsResults(result) {
             <td>${v.url ? `<a href="${escHtml(v.url)}" class="video-link" target="_blank" rel="noopener">🔗 打开</a>` : '-'}</td>
         </tr>`;
     });
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
+    html += `<div style="margin-top:16px"><button class="btn" onclick="downloadViewsExcel()">📥 下载回填 View 的 Excel</button></div>`;
+    html += '</div>';
     container.innerHTML = html;
+    // 保存数据供下载使用
+    window._viewsResultData = videos;
+}
+
+function downloadViewsExcel() {
+    const videos = window._viewsResultData || [];
+    if (!videos.length) { alert('暂无数据可下载'); return; }
+
+    // 构建 CSV 内容
+    const headers = ['平台', '达人', '播放量', '点赞', '评论', '标题', '链接'];
+    const rows = videos.map(v => [
+        v.platform || '',
+        v.author || '',
+        v.views !== null && v.views !== undefined ? v.views : '',
+        v.likes !== null && v.likes !== undefined ? v.likes : '',
+        v.comments !== null && v.comments !== undefined ? v.comments : '',
+        (v.title || '').replace(/"/g, '""'),
+        v.url || ''
+    ]);
+
+    // CSV 编码（处理中文）
+    const csvContent = '\uFEFF' + [headers, ...rows].map(r =>
+        r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    ).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    const now = new Date().toISOString().slice(0, 10);
+    link.download = `view_update_${now}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
 }
 
 // ============ API Key Management ============
@@ -1366,23 +1402,58 @@ async function saveApiKeys() {
     }
 }
 
-// 检测错误是否是额度耗尽
-function isCreditError(errText) {
-    if (!errText) return false;
-    const t = errText.toLowerCase();
-    return t.includes('out of credits') || t.includes('not-enough-usage') || t.includes('额度') || t.includes('402');
+// 检测错误类型
+function classifyError(errText) {
+    if (!errText) return {type: 'unknown'};
+    const t = (typeof errText === 'string' ? errText : JSON.stringify(errText)).toLowerCase();
+    if (t.includes('credit_exhausted') || t.includes('out of credits') || t.includes('not-enough-usage') || t.includes('额度已用完')) {
+        return {type: 'credit_exhausted', label: '额度耗尽'};
+    }
+    if (t.includes('scrapecreators_404') || (t.includes('404') && (t.includes('无法访问') || t.includes('私密') || t.includes('删除')))) {
+        return {type: 'video_404', label: '视频无法访问'};
+    }
+    if (t.includes('rate_limited') || t.includes('过于频繁')) {
+        return {type: 'rate_limited', label: '请求过频'};
+    }
+    if (t.includes('auth_failed') || t.includes('401') || t.includes('key 无效') || t.includes('key 无效')) {
+        return {type: 'auth_failed', label: 'Key 无效'};
+    }
+    if (t.includes('402')) return {type: 'credit_exhausted', label: '额度耗尽'};
+    return {type: 'unknown', label: '未知错误'};
 }
 
-// 统一显示错误，自动识别额度耗尽并给出设置入口
+function isCreditError(errText) {
+    return classifyError(errText).type === 'credit_exhausted';
+}
+
+// 统一显示错误，自动识别错误类型并给出对应操作入口
 function renderError(containerId, message, serviceName) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-    if (isCreditError(msgStr)) {
-        container.innerHTML = `<span class="error">${serviceName || 'API'} 额度已用完：${escHtml(msgStr)}</span> 
-            <button class="btn" style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="openSettingsModal()">⚙️ 输入新 Key</button>`;
-    } else {
-        container.innerHTML = `<span class="error">${escHtml(msgStr)}</span>`;
+    const errType = classifyError(msgStr);
+
+    switch (errType.type) {
+        case 'credit_exhausted':
+            container.innerHTML = `<span class="error">💰 ${serviceName || 'API'} 额度已用完</span> 
+                <button class="btn" style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="openSettingsModal()">⚙️ 输入新 Key</button>
+                <div class="text-sm" style="margin-top:4px">${escHtml(msgStr.substring(0, 200))}</div>`;
+            break;
+        case 'video_404':
+            container.innerHTML = `<span class="error">🔒 视频无法访问</span>
+                <div style="font-size:13px;color:#64748b;margin-top:4px">该视频可能为私密账号、已删除或存在地区限制。请确认链接在浏览器中可正常打开后重试。</div>
+                <div class="text-sm" style="margin-top:4px">${escHtml(msgStr.substring(0, 200))}</div>`;
+            break;
+        case 'rate_limited':
+            container.innerHTML = `<span class="error">⏳ 请求过于频繁</span>
+                <div style="font-size:13px;color:#64748b;margin-top:4px">请稍等 10-30 秒后重试。</div>`;
+            break;
+        case 'auth_failed':
+            container.innerHTML = `<span class="error">🔑 ${serviceName || 'API'} Key 无效</span>
+                <button class="btn" style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="openSettingsModal()">⚙️ 检查 Key</button>`;
+            break;
+        default:
+            container.innerHTML = `<span class="error">${escHtml(msgStr.substring(0, 300))}</span>`;
     }
 }
 

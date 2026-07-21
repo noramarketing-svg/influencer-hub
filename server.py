@@ -519,6 +519,27 @@ def _normalize_url(url):
     return url
 
 
+def _raise_sc_error(response, platform_label, url):
+    """根据 HTTP 状态码抛出区分度更好的中文错误"""
+    status = response.status_code
+    try:
+        body = response.json()
+        msg = body.get("message", response.text[:200])
+    except Exception:
+        msg = response.text[:200]
+
+    if status == 402:
+        raise Exception(f"SCRAPECREATORS_CREDIT_EXHAUSTED: {platform_label} API 额度已用完，请在 API 设置中更换 ScrapeCreators Key。原始信息：{msg}")
+    elif status == 404:
+        raise Exception(f"SCRAPECREATORS_404: 该 {platform_label} 视频无法访问（可能为私密账号、已删除或地区限制）。请确认链接可正常打开。链接：{url}")
+    elif status == 429:
+        raise Exception(f"SCRAPECREATORS_RATE_LIMITED: {platform_label} API 请求过于频繁，请稍后重试。原始信息：{msg}")
+    elif status == 401:
+        raise Exception(f"SCRAPECREATORS_AUTH_FAILED: {platform_label} API Key 无效，请在 API 设置中检查。原始信息：{msg}")
+    else:
+        raise Exception(f"{platform_label} API 请求失败 (HTTP {status}): {msg}")
+
+
 def _detect_platform(url):
     """从 URL 识别平台"""
     url = (url or "").lower()
@@ -535,7 +556,7 @@ def _fetch_video_metadata_sc(url, platform):
     if "tiktok" in platform_lower:
         r = requests.get("https://api.scrapecreators.com/v2/tiktok/video", params={"url": url}, headers=SC_HEADERS, timeout=30)
         if r.status_code != 200:
-            raise Exception(f"TikTok video info failed: {r.status_code} {r.text[:200]}")
+            _raise_sc_error(r, "TikTok", url)
         data = r.json()
         ad = data.get("aweme_detail", {})
         stats = ad.get("statistics", {})
@@ -558,11 +579,36 @@ def _fetch_video_metadata_sc(url, platform):
     elif "instagram" in platform_lower:
         r = requests.get("https://api.scrapecreators.com/v1/instagram/post", params={"url": url}, headers=SC_HEADERS, timeout=30)
         if r.status_code != 200:
-            raise Exception(f"Instagram post info failed: {r.status_code} {r.text[:200]}")
+            _raise_sc_error(r, "Instagram", url)
         data = r.json()
         media = data.get("data", {}).get("xdt_shortcode_media", {})
-        caption = (media.get("caption", {}) or {}).get("text", "")
         owner = media.get("owner", {}) or {}
+
+        # Caption: try direct caption first, fallback to edge_media_to_caption
+        caption = ""
+        if media.get("caption"):
+            caption = media["caption"].get("text", "") or ""
+        if not caption:
+            edge_caption = media.get("edge_media_to_caption", {})
+            edges = edge_caption.get("edges", [])
+            if edges:
+                caption = edges[0].get("node", {}).get("text", "") or ""
+
+        # Views: video_play_count is more accurate for Reels
+        views = media.get("video_play_count", 0) or media.get("video_view_count", 0) or 0
+
+        # Likes: like_count is often N/A, use edge_media_preview_like
+        likes = media.get("like_count", 0)
+        if not likes:
+            likes = media.get("edge_media_preview_like", {}).get("count", 0) or 0
+
+        # Comments: comment_count is often N/A, use edge counts
+        comments = media.get("comment_count", 0)
+        if not comments:
+            comments = media.get("edge_media_to_parent_comment", {}).get("count", 0) or 0
+            if not comments:
+                comments = media.get("edge_media_preview_comment", {}).get("count", 0) or 0
+
         return {
             "platform": "Instagram",
             "video_id": media.get("shortcode", ""),
@@ -570,12 +616,12 @@ def _fetch_video_metadata_sc(url, platform):
             "author": owner.get("username", ""),
             "title": caption,
             "thumbnail": media.get("thumbnail_src", ""),
-            "views": media.get("video_view_count", 0) or media.get("video_play_count", 0) or 0,
-            "likes": media.get("like_count", 0) or media.get("edge_media_preview_like", {}).get("count", 0),
-            "comments": media.get("comment_count", 0) or media.get("edge_media_to_comment", {}).get("count", 0),
+            "views": views,
+            "likes": likes,
+            "comments": comments,
             "shares": None,
             "collects": None,
-            "published_at": media.get("taken_at", ""),
+            "published_at": media.get("taken_at_timestamp", ""),
             "duration": media.get("video_duration", 0),
         }
     else:
