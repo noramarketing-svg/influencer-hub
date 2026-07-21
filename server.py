@@ -18,6 +18,7 @@ from english_classifier import classify_title_en, load_config as load_en_config
 from spanish_classifier import classify_title_es, load_config as load_es_config
 from comment_analyzer import classify_single_comment, analyze_video_comments, analyze_account_comments, load_config as load_comment_config
 from socialcrawl_fetcher import fetch_ig_comments_sc, fetch_tiktok_comments_sc, get_top_valid_comments, fetch_comments_for_video
+from apify_fetcher import fetch_instagram_videos, fetch_tiktok_videos
 
 CAT_COLORS = {
     "3C配件品牌赞助/种草": "#F8CBAD",
@@ -445,14 +446,7 @@ def api_apify_fetch():
     if not api_key:
         return jsonify({"error": "请提供 Apify API Key"}), 400
 
-    # Try importing Apify fetcher
-    try:
-        from apify_fetcher import fetch_instagram_videos, fetch_tiktok_videos
-    except ImportError:
-        return jsonify({
-            "error": "Apify 集成模块未就绪",
-            "message": "apify_fetcher.py 尚未创建，请提供 Apify API Key 和 Actor 信息"
-        }), 500
+    # Apify fetcher already imported at top level
 
     try:
         if "instagram" in platform.lower():
@@ -778,8 +772,6 @@ def api_batch_fetch():
 
     if not usernames:
         return jsonify({"error": "请提供需要抓取的达人列表"}), 400
-
-    from apify_fetcher import fetch_instagram_videos, fetch_tiktok_videos
 
     # Select classifier
     if language == "es":

@@ -140,7 +140,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 </div>
 <div class="input-group" style="flex:3">
 <label>📥 达人链接或ID <span style="font-weight:400;color:#64748b;font-size:11px">（多个用逗号/换行分隔）</span></label>
-<textarea id="input-url" placeholder="例如: @letsdodizz, @imparkerburton&#10;或一行一个达人ID" rows="2" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical">@letsdodizz</textarea>
+<textarea id="input-url" placeholder="例如: @letsdodizz, @imparkerburton&#10;或一行一个达人ID" rows="2" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea>
 </div>
 <div class="input-group">
 <label>📅 采集天数</label>
@@ -157,6 +157,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <div id="batch-progress" class="hidden" style="margin-top:12px">
 <div class="progress-bar"><div class="progress-fill" id="batch-progress-fill" style="width:0%"></div></div>
 <p class="text-sm" id="batch-progress-text"></p>
+<button class="btn btn-secondary" id="batch-stop-btn" onclick="stopBatchAnalyze()" style="margin-top:8px">⏹ 停止分析</button>
 </div>
 </div>
 
@@ -218,6 +219,7 @@ let currentUsername = '';
 let currentPlatform = '';
 let commentAnalysisData = null;
 let commentAbortController = null;  // For stopping comment fetch
+let batchAbortController = null;    // For stopping batch analyze
 
 const CAT_COLORS = {
     "3C配件品牌赞助/种草":"#F8CBAD","Apple/iOS生态":"#DDEBF7","其他品牌产品种草":"#FCE4D6",
@@ -662,20 +664,34 @@ async function batchAnalyze() {
     const progressBar = document.getElementById('batch-progress');
     const progressFill = document.getElementById('batch-progress-fill');
     const progressText = document.getElementById('batch-progress-text');
+    const stopBtn = document.getElementById('batch-stop-btn');
 
     if (!inputs.length) { status.innerHTML = '<span class="error">请输入达人账号</span>'; return; }
+
+    // Abort any existing batch
+    if (batchAbortController) {
+        batchAbortController.abort();
+    }
+    batchAbortController = new AbortController();
 
     batchBtn.disabled = true;
     status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在检查 ${inputs.length} 个达人的缓存状态...`;
     progressBar.classList.remove('hidden');
+    stopBtn.classList.remove('hidden');
+    stopBtn.textContent = '⏹ 停止分析';
+    stopBtn.disabled = false;
 
     try {
         // Step 1: Check cache for all
         const checkResp = await fetch('/api/batch/analyze', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({inputs, platform, days, language})
+            body: JSON.stringify({inputs, platform, days, language}),
+            signal: batchAbortController.signal
         });
+
+        if (batchAbortController.signal.aborted) return;
+
         const checkData = await checkResp.json();
 
         const cachedUsers = checkData.cached || [];
@@ -696,8 +712,12 @@ async function batchAnalyze() {
                 body: JSON.stringify({
                     usernames: needApifyUsers.map(u => u.username),
                     platform, days, language
-                })
+                }),
+                signal: batchAbortController.signal
             });
+
+            if (batchAbortController.signal.aborted) return;
+
             const fetchData = await fetchResp.json();
             progressFill.style.width = '80%';
             progressText.textContent = `抓取完成: ${fetchData.total_done} 成功, ${fetchData.total_error} 失败`;
@@ -716,6 +736,7 @@ async function batchAnalyze() {
             // All cached — load from cache
             allVideos = [];
             for (const cu of cachedUsers) {
+                if (batchAbortController.signal.aborted) return;
                 const resp = await fetch('/api/analyze', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -728,6 +749,7 @@ async function batchAnalyze() {
 
         progressFill.style.width = '100%';
         progressText.textContent = `✅ 全部完成: ${allVideos.length} 条视频`;
+        stopBtn.classList.add('hidden');
 
         if (allVideos.length > 0) {
             renderTopicAndVideos();
@@ -737,10 +759,26 @@ async function batchAnalyze() {
             status.innerHTML = '<span class="error">所有达人均无缓存数据，请先单个抓取</span>';
         }
     } catch(e) {
+        if (e.name === 'AbortError') {
+            status.innerHTML = `<span class="ok">⏹ 已停止批量分析</span>`;
+            progressText.textContent = '已停止';
+            stopBtn.classList.add('hidden');
+            return;
+        }
         status.innerHTML = `<span class="error">批量分析失败: ${e.message}</span>`;
     } finally {
         batchBtn.disabled = false;
         progressBar.classList.add('hidden');
+        stopBtn.classList.add('hidden');
+    }
+}
+
+function stopBatchAnalyze() {
+    if (batchAbortController) {
+        batchAbortController.abort();
+        batchAbortController = null;
+        document.getElementById('batch-stop-btn').textContent = '已停止';
+        document.getElementById('batch-stop-btn').disabled = true;
     }
 }
 
