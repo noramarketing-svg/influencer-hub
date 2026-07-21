@@ -119,13 +119,56 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 .mt-8{margin-top:8px}
 .mb-12{margin-bottom:12px}
 .text-sm{font-size:12px;color:#64748b}
+
+/* Sidebar + Panel Layout */
+.layout{display:flex;gap:20px;align-items:flex-start}
+.sidebar{width:220px;background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 12px rgba(0,0,0,0.08);position:sticky;top:20px;flex-shrink:0}
+.sidebar h3{font-size:13px;color:#64748b;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700}
+.nav-btn{width:100%;text-align:left;background:none;border:none;padding:12px;border-radius:8px;font-size:14px;color:#334155;cursor:pointer;margin-bottom:6px;display:flex;align-items:center;gap:8px;transition:all 0.2s}
+.nav-btn:hover{background:#f1f5f9}
+.nav-btn.active{background:#eef2ff;color:#4472C4;font-weight:600}
+.main-content{flex:1;min-width:0}
+.panel-header{margin-bottom:20px}
+.panel-header h1{margin-bottom:4px}
+
+/* Single video results */
+.transcript-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;font-size:13px;line-height:1.8;max-height:300px;overflow-y:auto;white-space:pre-wrap}
+.analysis-card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:12px}
+.analysis-card h4{font-size:14px;color:#1a1a2e;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.analysis-card p{font-size:13px;color:#475569;line-height:1.7}
+.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.meta-item{background:#f8fafc;border-radius:8px;padding:12px;text-align:center}
+.meta-item .num{font-size:20px;font-weight:700;color:#4472C4}
+.meta-item .label{font-size:12px;color:#64748b}
 </style>
 </head>
 <body>
-<div class="container">
+<div class="container layout">
 
-<h1>📊 达人账号选题 &amp; 评论分析系统 v3.0</h1>
-<p class="subtitle">输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向</p>
+<!-- Sidebar -->
+<aside class="sidebar">
+    <h3>📊 分析看板</h3>
+    <button class="nav-btn active" id="nav-1" onclick="switchPanel(1)">
+        <span>1</span> 选题 &amp; 评论总盘
+    </button>
+    <button class="nav-btn" id="nav-2" onclick="switchPanel(2)">
+        <span>2</span> 单条视频深入分析
+    </button>
+    <button class="nav-btn" id="nav-3" onclick="switchPanel(3)">
+        <span>3</span> 数据更新入口
+    </button>
+</aside>
+
+<!-- Main Content -->
+<main class="main-content">
+
+<div class="panel-header">
+    <h1>📊 达人账号分析系统 v3.0</h1>
+    <p class="subtitle" id="page-subtitle">输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向</p>
+</div>
+
+<!-- Panel 1: Existing Influencer Analysis -->
+<div id="panel-1" class="panel">
 
 <!-- Input Panel -->
 <div class="input-panel">
@@ -210,6 +253,45 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 </div>
 
 </div>
+</div>
+
+<!-- Panel 2: Single Video Deep Analysis -->
+<div id="panel-2" class="panel hidden">
+    <div class="input-panel">
+        <h2 style="margin-bottom:16px">🎬 单条视频深入分析</h2>
+        <div class="input-row">
+            <div class="input-group" style="flex:3">
+                <label>🎥 视频链接 <span style="font-weight:400;color:#64748b;font-size:11px">（TikTok / Instagram 任意视频）</span></label>
+                <input type="text" id="video-url-input" placeholder="例如: https://www.tiktok.com/@username/video/1234567890" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px">
+            </div>
+            <div class="input-group">
+                <label>📱 平台</label>
+                <select id="video-platform-input"><option value="">自动识别</option><option value="TikTok">TikTok</option><option value="Instagram">Instagram</option></select>
+            </div>
+            <div class="input-group">
+                <label>🌐 语言</label>
+                <select id="video-language-input"><option value="en" selected>英语</option><option value="es">西语</option></select>
+            </div>
+            <button class="btn" id="video-analyze-btn" onclick="analyzeSingleVideo()" style="margin-bottom:0">开始分析</button>
+        </div>
+        <div class="status" id="video-status"></div>
+    </div>
+    <div id="video-results-area" class="hidden"></div>
+</div>
+
+<!-- Panel 3: Bulk Video View Update -->
+<div id="panel-3" class="panel hidden">
+    <div class="input-panel">
+        <h2 style="margin-bottom:16px">📤 批量视频 View 更新</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">上传 Excel 表格，需包含一列名为 <code>url</code> 的视频链接（TikTok / Instagram 可混排）。</p>
+        <input type="file" id="views-excel-input" accept=".xlsx,.xls" style="padding:8px 0;font-size:14px">
+        <button class="btn" id="views-upload-btn" onclick="uploadViewsExcel()" style="margin-top:12px">上传并更新 View</button>
+        <div class="status" id="views-status"></div>
+    </div>
+    <div id="views-results-area" class="hidden"></div>
+</div>
+
+</main>
 </div>
 
 <script>
@@ -909,9 +991,272 @@ function escHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ============ Panel Navigation ============
+function switchPanel(num) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('panel-' + num).classList.remove('hidden');
+    document.getElementById('nav-' + num).classList.add('active');
+    const subtitles = {
+        1: '输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向',
+        2: '输入任意 TikTok / Instagram 视频链接 → 口播全文 + HOOK/中段/CTA 拆解 + 全部评论',
+        3: '上传包含视频链接的 Excel → 批量返回最新 View 数据'
+    };
+    document.getElementById('page-subtitle').textContent = subtitles[num];
+}
+
+// ============ Panel 2: Single Video Analysis ============
+let videoAbortController = null;
+
+async function analyzeSingleVideo() {
+    const url = document.getElementById('video-url-input').value.trim();
+    const platform = document.getElementById('video-platform-input').value;
+    const language = document.getElementById('video-language-input').value;
+    const status = document.getElementById('video-status');
+    const btn = document.getElementById('video-analyze-btn');
+    const resultsArea = document.getElementById('video-results-area');
+
+    if (!url) { status.innerHTML = '<span class="error">请输入视频链接</span>'; return; }
+
+    btn.disabled = true;
+    resultsArea.classList.add('hidden');
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 启动分析任务...';
+
+    videoAbortController = new AbortController();
+
+    try {
+        const resp = await fetch('/api/video/analyze', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            signal: videoAbortController.signal,
+            body: JSON.stringify({url, platform, language})
+        });
+        const initData = await resp.json();
+        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
+
+        const taskId = initData.task_id;
+        let elapsed = 0;
+        while (true) {
+            await new Promise(r => setTimeout(r, 3000));
+            elapsed += 3;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 分析中... (已等待 ${elapsed}s) <button class="btn btn-secondary" style="margin-left:8px;padding:4px 8px;font-size:12px" onclick="stopVideoAnalysis()">停止</button>`;
+
+            const pollResp = await fetch('/api/video/status/' + taskId, {signal: videoAbortController.signal});
+            if (videoAbortController.signal.aborted) return;
+            const pollData = await pollResp.json();
+
+            if (pollData.status === 'done') {
+                status.innerHTML = '<span class="ok">✅ 视频分析完成</span>';
+                renderSingleVideoResults(pollData.result);
+                resultsArea.classList.remove('hidden');
+                break;
+            } else if (pollData.status === 'error') {
+                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                break;
+            }
+            if (elapsed > 180) {
+                status.innerHTML = '<span class="error">分析超时（>180s），请重试</span>';
+                break;
+            }
+        }
+    } catch(e) {
+        if (videoAbortController.signal.aborted) {
+            status.innerHTML = '<span class="error">分析已停止</span>';
+        } else {
+            status.innerHTML = `<span class="error">请求失败: ${e.message}</span>`;
+        }
+    } finally {
+        btn.disabled = false;
+        videoAbortController = null;
+    }
+}
+
+function stopVideoAnalysis() {
+    if (videoAbortController) {
+        videoAbortController.abort();
+        videoAbortController = null;
+    }
+}
+
+function renderSingleVideoResults(result) {
+    const container = document.getElementById('video-results-area');
+    const meta = result.metadata || {};
+    const analysis = result.analysis || {};
+    const comments = result.comments || [];
+    const transcript = result.transcript || '（未获取到口播原文）';
+
+    // Format numbers
+    const fmt = n => n === null || n === undefined ? '-' : Number(n).toLocaleString();
+
+    // Comments HTML
+    let commentsHtml = '';
+    if (comments.length) {
+        commentsHtml = `<p style="font-size:13px;color:#64748b;margin-bottom:8px">共 ${comments.length} 条有效评论</p>`;
+        comments.forEach(c => {
+            commentsHtml += `<div class="comment-item" style="padding:8px 0;border-bottom:1px dashed #e2e8f0">
+                <span style="font-weight:600">@${escHtml(c.username || '匿名')}</span>
+                <span style="color:#64748b;font-size:12px">👍 ${c.likes || 0}</span>
+                <p style="margin-top:4px">${escHtml(c.text || '')}</p>
+            </div>`;
+        });
+    } else {
+        commentsHtml = '<p class="text-sm">未抓取到有效评论</p>';
+    }
+
+    container.innerHTML = `
+        <div class="section">
+            <h2>📊 基础数据盘</h2>
+            <div class="meta-grid">
+                <div class="meta-item"><div class="num">${fmt(meta.views)}</div><div class="label">播放量</div></div>
+                <div class="meta-item"><div class="num">${fmt(meta.likes)}</div><div class="label">点赞</div></div>
+                <div class="meta-item"><div class="num">${fmt(meta.comments)}</div><div class="label">评论</div></div>
+                <div class="meta-item"><div class="num">${fmt(meta.shares)}</div><div class="label">分享</div></div>
+                <div class="meta-item"><div class="num">${escHtml(meta.author || '-')}</div><div class="label">达人</div></div>
+                <div class="meta-item"><div class="num">${meta.platform || '-'}</div><div class="label">平台</div></div>
+            </div>
+            <p style="font-size:13px;color:#64748b"><strong>标题：</strong>${escHtml(meta.title || '-')}</p>
+            <p style="font-size:13px;color:#64748b;margin-top:4px"><strong>链接：</strong><a href="${escHtml(meta.url || '')}" class="video-link" target="_blank" rel="noopener">${escHtml(meta.url || '')}</a></p>
+        </div>
+
+        <div class="section">
+            <h2>📝 口播原文</h2>
+            <div class="transcript-box">${escHtml(transcript)}</div>
+        </div>
+
+        <div class="section">
+            <h2>🧠 内容拆解（DeepSeek）</h2>
+            <div class="analysis-card">
+                <h4>🎯 HOOK（前 3 秒）</h4>
+                <p>${escHtml(analysis.hook || '暂无分析')}</p>
+            </div>
+            <div class="analysis-card">
+                <h4>📝 中段内容</h4>
+                <p>${escHtml(analysis.middle || '暂无分析')}</p>
+            </div>
+            <div class="analysis-card">
+                <h4>📢 CTA / 结尾引导</h4>
+                <p>${escHtml(analysis.cta || '暂无分析')}</p>
+            </div>
+            <div class="analysis-card">
+                <h4>💡 一句话总结</h4>
+                <p>${escHtml(analysis.content_summary || '暂无分析')}</p>
+            </div>
+            <div class="analysis-card">
+                <h4>👥 观众洞察</h4>
+                <p>${escHtml(analysis.audience_insight || '暂无分析')}</p>
+            </div>
+            <div class="analysis-card">
+                <h4>🔧 优化建议</h4>
+                <p>${escHtml(analysis.improvement_suggestions || '暂无分析')}</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>💬 全部评论（最多 50 条）</h2>
+            <div>${commentsHtml}</div>
+        </div>
+    `;
+}
+
+// ============ Panel 3: Bulk Views Update ============
+let viewsAbortController = null;
+
+async function uploadViewsExcel() {
+    const input = document.getElementById('views-excel-input');
+    const status = document.getElementById('views-status');
+    const btn = document.getElementById('views-upload-btn');
+    const resultsArea = document.getElementById('views-results-area');
+
+    if (!input.files || !input.files[0]) { status.innerHTML = '<span class="error">请选择 Excel 文件</span>'; return; }
+
+    btn.disabled = true;
+    resultsArea.classList.add('hidden');
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在上传并解析 Excel...';
+
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+
+    viewsAbortController = new AbortController();
+
+    try {
+        const resp = await fetch('/api/videos/views/upload', {
+            method: 'POST',
+            body: formData,
+            signal: viewsAbortController.signal
+        });
+        const initData = await resp.json();
+        if (initData.error) { status.innerHTML = `<span class="error">${initData.error}</span>`; btn.disabled = false; return; }
+
+        const taskId = initData.task_id;
+        const total = initData.total || 0;
+        let elapsed = 0;
+        while (true) {
+            await new Promise(r => setTimeout(r, 3000));
+            elapsed += 3;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在抓取 ${total} 条视频的 View... (已等待 ${elapsed}s)`;
+
+            const pollResp = await fetch('/api/videos/views/status/' + taskId, {signal: viewsAbortController.signal});
+            if (viewsAbortController.signal.aborted) return;
+            const pollData = await pollResp.json();
+
+            if (pollData.status === 'done') {
+                status.innerHTML = '<span class="ok">✅ View 更新完成</span>';
+                renderViewsResults(pollData.result);
+                resultsArea.classList.remove('hidden');
+                break;
+            } else if (pollData.status === 'error') {
+                status.innerHTML = `<span class="error">${pollData.error}</span>`;
+                break;
+            }
+            if (elapsed > 300) {
+                status.innerHTML = '<span class="error">抓取超时（>300s），请重试</span>';
+                break;
+            }
+        }
+    } catch(e) {
+        if (viewsAbortController.signal.aborted) {
+            status.innerHTML = '<span class="error">已停止</span>';
+        } else {
+            status.innerHTML = `<span class="error">上传失败: ${e.message}</span>`;
+        }
+    } finally {
+        btn.disabled = false;
+        viewsAbortController = null;
+    }
+}
+
+function renderViewsResults(result) {
+    const container = document.getElementById('views-results-area');
+    const videos = result.videos || [];
+    if (!videos.length) {
+        container.innerHTML = '<div class="section"><p class="text-sm">无结果</p></div>';
+        return;
+    }
+
+    const fmt = n => n === null || n === undefined ? '-' : Number(n).toLocaleString();
+    let html = `<div class="section"><h2>📊 最新 View 数据</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">共 ${videos.length} 条链接</p>
+        <table class="video-table"><thead><tr><th>平台</th><th>达人</th><th>播放量</th><th>点赞</th><th>评论</th><th>标题</th><th>链接</th></tr></thead><tbody>`;
+
+    videos.forEach(v => {
+        html += `<tr>
+            <td>${escHtml(v.platform || '-')}</td>
+            <td>${escHtml(v.author || '-')}</td>
+            <td>${fmt(v.views)}</td>
+            <td>${fmt(v.likes)}</td>
+            <td>${fmt(v.comments)}</td>
+            <td>${escHtml((v.title || '').substring(0,80))}</td>
+            <td>${v.url ? `<a href="${escHtml(v.url)}" class="video-link" target="_blank" rel="noopener">🔗 打开</a>` : '-'}</td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
 // ============ Init ============
 // Page loads with empty state — user must input influencer
 document.getElementById('results-area').classList.add('hidden');
+switchPanel(1);
 </script>
 </body>
 </html>

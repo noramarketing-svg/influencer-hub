@@ -9,9 +9,16 @@ from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_from_directory
+from openai import OpenAI
 
 # 异步任务存储（内存字典）
 _async_tasks = {}  # {task_id: {status, result, error, ...}}
+
+# DeepSeek 配置
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-022e1d49363743c786043907dad15a98")
+DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
+SC_API_KEY = "YhZY3Y5FfGSom6oKq4MRmtFrWrI2"
+SC_HEADERS = {"x-api-key": SC_API_KEY}
 
 app = Flask(__name__)
 
@@ -476,6 +483,346 @@ def _calc_purchase_intent(classified_comments, config):
         label = interpretation["low"].get("label_zh", "低购买意向")
 
     return round(avg_score, 2), label
+
+
+# ============================================================
+# Helpers: 单条视频分析（板块 2）+ 批量 View 更新（板块 3）
+# ============================================================
+def _detect_platform(url):
+    """从 URL 识别平台"""
+    url = (url or "").lower()
+    if "tiktok.com" in url:
+        return "TikTok"
+    if "instagram.com" in url:
+        return "Instagram"
+    return ""
+
+
+def _fetch_video_metadata_sc(url, platform):
+    """通过 ScrapeCreators 获取单视频基础数据"""
+    platform_lower = (platform or "").lower()
+    if "tiktok" in platform_lower:
+        r = requests.get("https://api.scrapecreators.com/v2/tiktok/video", params={"url": url}, headers=SC_HEADERS, timeout=30)
+        if r.status_code != 200:
+            raise Exception(f"TikTok video info failed: {r.status_code} {r.text[:200]}")
+        data = r.json()
+        ad = data.get("aweme_detail", {})
+        stats = ad.get("statistics", {})
+        author = ad.get("author", {})
+        return {
+            "platform": "TikTok",
+            "video_id": stats.get("aweme_id", ""),
+            "url": url,
+            "author": author.get("unique_id", ""),
+            "title": ad.get("desc", ""),
+            "thumbnail": ad.get("cover", {}).get("url_list", [""])[0] if ad.get("cover") else "",
+            "views": stats.get("play_count", 0),
+            "likes": stats.get("digg_count", 0),
+            "comments": stats.get("comment_count", 0),
+            "shares": stats.get("share_count", 0),
+            "collects": stats.get("collect_count", 0),
+            "published_at": ad.get("create_time", ""),
+            "duration": ad.get("duration", 0),
+        }
+    elif "instagram" in platform_lower:
+        r = requests.get("https://api.scrapecreators.com/v1/instagram/post", params={"url": url}, headers=SC_HEADERS, timeout=30)
+        if r.status_code != 200:
+            raise Exception(f"Instagram post info failed: {r.status_code} {r.text[:200]}")
+        data = r.json()
+        media = data.get("data", {}).get("xdt_shortcode_media", {})
+        caption = (media.get("caption", {}) or {}).get("text", "")
+        owner = media.get("owner", {}) or {}
+        return {
+            "platform": "Instagram",
+            "video_id": media.get("shortcode", ""),
+            "url": url,
+            "author": owner.get("username", ""),
+            "title": caption,
+            "thumbnail": media.get("thumbnail_src", ""),
+            "views": media.get("video_view_count", 0) or media.get("video_play_count", 0) or 0,
+            "likes": media.get("like_count", 0) or media.get("edge_media_preview_like", {}).get("count", 0),
+            "comments": media.get("comment_count", 0) or media.get("edge_media_to_comment", {}).get("count", 0),
+            "shares": None,
+            "collects": None,
+            "published_at": media.get("taken_at", ""),
+            "duration": media.get("video_duration", 0),
+        }
+    else:
+        raise Exception(f"Unsupported platform: {platform}")
+
+
+def _fetch_transcript_sc(url, platform):
+    """通过 ScrapeCreators 获取视频口播原文"""
+    platform_lower = (platform or "").lower()
+    if "tiktok" in platform_lower:
+        r = requests.get("https://api.scrapecreators.com/v1/tiktok/video/transcript", params={"url": url, "language": "en"}, headers=SC_HEADERS, timeout=45)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        transcript = data.get("transcript")
+        if not transcript:
+            return None
+        # WEBVTT 格式，简单清理
+        lines = []
+        for line in transcript.splitlines():
+            line = line.strip()
+            if not line or line.startswith("WEBVTT") or "-->" in line or line.isdigit():
+                continue
+            lines.append(line)
+        return " ".join(lines)
+    elif "instagram" in platform_lower:
+        r = requests.get("https://api.scrapecreators.com/v2/instagram/media/transcript", params={"url": url}, headers=SC_HEADERS, timeout=60)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        transcripts = data.get("transcripts", [])
+        if transcripts and transcripts[0].get("text"):
+            return transcripts[0].get("text")
+        return None
+    return None
+
+
+def _fetch_comments_single_video_sc(url, platform, target_valid=50):
+    """抓取单条视频的评论，最多 target_valid 条有效评论"""
+    platform_lower = (platform or "").lower()
+    if "instagram" in platform_lower:
+        comments = fetch_ig_comments_sc(url, target_valid=target_valid, max_pages=15)
+    elif "tiktok" in platform_lower:
+        comments = fetch_tiktok_comments_sc(url, target_valid=target_valid, max_pages=15)
+    else:
+        comments = []
+    # 按点赞排序，保留有效评论
+    valid = [c for c in comments if c.get("valid", True)]
+    return valid[:target_valid]
+
+
+def _analyze_video_with_deepseek(transcript, comments_sample, language="en"):
+    """调用 DeepSeek 分析视频口播：HOOK、中段、CTA"""
+    if not DEEPSEEK_CLIENT:
+        return {"error": "DeepSeek 未配置"}
+
+    comments_text = "\n".join([f"- {c.get('text','')}" for c in comments_sample[:15]])
+    prompt = f"""你是一位资深短视频内容分析专家。请基于以下视频口播原文和代表性评论，对这条视频进行结构化拆解。
+
+【口播原文】
+{transcript or '（未获取到口播原文）'}
+
+【代表性评论】
+{comments_text or '（无评论）'}
+
+请按以下 JSON 格式输出（只输出 JSON，不要多余说明）：
+{{
+  "hook": "前3秒如何吸引用户注意，具体话术/画面逻辑",
+  "middle": "中段核心内容/卖点/节奏分析",
+  "cta": "结尾引导行为/转化话术分析",
+  "content_summary": "整条视频内容一句话总结",
+  "audience_insight": "从评论中看出观众最关注什么",
+  "improvement_suggestions": "可优化建议（3-5条）"
+}}
+"""
+    try:
+        r = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是短视频内容分析专家，只输出结构化的 JSON。"},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1500,
+            temperature=0.7,
+        )
+        content = r.choices[0].message.content
+        # 尝试解析 JSON
+        try:
+            # 清理可能的 markdown 代码块
+            if "```" in content:
+                content = content.split("```")[1].replace("json", "").strip()
+            return json.loads(content)
+        except Exception:
+            return {"raw_analysis": content}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _run_single_video_analysis(task_id, url, platform, language):
+    """后台线程：单条视频深入分析"""
+    try:
+        _async_tasks[task_id] = {"status": "running", "progress": "识别平台并抓取基础数据..."}
+        metadata = _fetch_video_metadata_sc(url, platform)
+
+        _async_tasks[task_id]["progress"] = "抓取口播原文..."
+        transcript = _fetch_transcript_sc(url, platform)
+
+        _async_tasks[task_id]["progress"] = "抓取全部评论..."
+        comments = _fetch_comments_single_video_sc(url, platform, target_valid=50)
+
+        _async_tasks[task_id]["progress"] = "AI 拆解 HOOK / 中段 / CTA..."
+        analysis = _analyze_video_with_deepseek(transcript, comments, language)
+
+        _async_tasks[task_id] = {
+            "status": "done",
+            "result": {
+                "metadata": metadata,
+                "transcript": transcript,
+                "comments": comments,
+                "analysis": analysis,
+            }
+        }
+    except Exception as e:
+        import traceback
+        _async_tasks[task_id] = {"status": "error", "error": str(e), "trace": traceback.format_exc()}
+
+
+def _run_batch_views(task_id, urls):
+    """后台线程：批量抓取视频最新 View"""
+    results = []
+    for i, url in enumerate(urls):
+        _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{len(urls)}..."}
+        platform = _detect_platform(url)
+        try:
+            meta = _fetch_video_metadata_sc(url, platform)
+            results.append({
+                "url": url,
+                "platform": platform,
+                "author": meta.get("author"),
+                "title": meta.get("title", "")[:120],
+                "views": meta.get("views"),
+                "likes": meta.get("likes"),
+                "comments": meta.get("comments"),
+            })
+        except Exception as e:
+            results.append({"url": url, "platform": platform, "error": str(e)})
+    _async_tasks[task_id] = {"status": "done", "result": {"videos": results, "total": len(results)}}
+
+
+# ============================================================
+# API: 单条视频深入分析（板块 2）
+# ============================================================
+@app.route("/api/video/analyze", methods=["POST"])
+def api_video_analyze():
+    """单条视频深入分析：启动异步任务"""
+    try:
+        data = request.get_json()
+        url = data.get("url", "").strip()
+        platform = data.get("platform", "").strip()
+        language = data.get("language", "en")
+
+        if not url:
+            return jsonify({"error": "请提供视频链接"}), 400
+
+        if not platform:
+            platform = _detect_platform(url)
+        if platform not in ["TikTok", "Instagram"]:
+            return jsonify({"error": "仅支持 TikTok 或 Instagram 视频链接"}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
+        t = threading.Thread(target=_run_single_video_analysis, args=(task_id, url, platform, language))
+        t.daemon = True
+        t.start()
+        return jsonify({"task_id": task_id, "status": "started"})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/video/status/<task_id>", methods=["GET"])
+def api_video_status(task_id):
+    """轮询单条视频分析状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
+    return jsonify(task)
+
+
+# ============================================================
+# API: 批量视频 View 更新（板块 3）
+# ============================================================
+@app.route("/api/videos/views", methods=["POST"])
+def api_videos_views():
+    """批量抓取视频最新 View：启动异步任务"""
+    try:
+        data = request.get_json()
+        urls = data.get("urls", [])
+        if not urls:
+            return jsonify({"error": "请提供视频链接列表"}), 400
+        if len(urls) > 200:
+            return jsonify({"error": "单次最多 200 条链接"}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
+        t = threading.Thread(target=_run_batch_views, args=(task_id, urls))
+        t.daemon = True
+        t.start()
+        return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/videos/views/status/<task_id>", methods=["GET"])
+def api_videos_views_status(task_id):
+    """轮询批量 View 抓取状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
+    return jsonify(task)
+
+
+@app.route("/api/videos/views/upload", methods=["POST"])
+def api_videos_views_upload():
+    """上传 Excel 并批量抓取 View（异步）"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "请上传 Excel 文件"}), 400
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({"error": "文件名为空"}), 400
+
+        # 保存临时文件
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in ['.xlsx', '.xls']:
+            return jsonify({"error": "仅支持 .xlsx / .xls 文件"}), 400
+
+        tmp_path = os.path.join('/tmp', f"views_upload_{uuid.uuid4().hex}{ext}")
+        file.save(tmp_path)
+
+        # 解析 Excel
+        from openpyxl import load_workbook
+        wb = load_workbook(tmp_path, data_only=True)
+        ws = wb.active
+
+        # 找到 url 列
+        headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
+        url_col = None
+        for i, h in enumerate(headers):
+            if h in ['url', '链接', '视频链接', 'video_url', 'link']:
+                url_col = i
+                break
+        if url_col is None:
+            return jsonify({"error": "Excel 中未找到 url 列，请确保第一行包含 url 列名"}), 400
+
+        urls = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            val = row[url_col] if url_col < len(row) else None
+            if val and str(val).strip():
+                urls.append(str(val).strip())
+
+        os.remove(tmp_path)
+
+        if not urls:
+            return jsonify({"error": "未从 Excel 中解析到任何链接"}), 400
+        if len(urls) > 200:
+            return jsonify({"error": f"链接数量 {len(urls)} 超过 200 条限制"}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
+        t = threading.Thread(target=_run_batch_views, args=(task_id, urls))
+        t.daemon = True
+        t.start()
+        return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
 # ============================================================
