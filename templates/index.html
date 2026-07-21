@@ -1299,10 +1299,18 @@ function renderViewsResults(result) {
         </tr>`;
     });
     html += '</tbody></table>';
-    html += `<div style="margin-top:16px"><button class="btn" onclick="downloadViewsExcel()">📥 下载回填 View 的 Excel</button></div>`;
+
+    // Excel 下载按钮：优先用服务器回填的 Excel，否则用前端 CSV
+    if (result.download_url) {
+        html += `<div style="margin-top:16px">
+            <a href="${result.download_url}" class="btn" style="text-decoration:none;display:inline-block">📥 下载回填 View 的 Excel（原格式）</a>
+        </div>`;
+    } else {
+        html += `<div style="margin-top:16px"><button class="btn" onclick="downloadViewsExcel()">📥 下载 View 数据 (CSV)</button></div>`;
+    }
     html += '</div>';
     container.innerHTML = html;
-    // 保存数据供下载使用
+    // 保存数据供前端 CSV 下载使用
     window._viewsResultData = videos;
 }
 

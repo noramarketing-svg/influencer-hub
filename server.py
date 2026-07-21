@@ -190,6 +190,13 @@ def health():
     })
 
 
+@app.route("/downloads/<path:filename>")
+def serve_download(filename):
+    """提供回填 Excel 下载"""
+    download_dir = os.path.join(BASE_DIR, "downloads")
+    return send_from_directory(download_dir, filename, as_attachment=True)
+
+
 @app.route("/")
 def index():
     """Serve the main page"""
@@ -749,8 +756,8 @@ def _run_single_video_analysis(task_id, url, platform, language):
         _async_tasks[task_id] = {"status": "error", "error": str(e), "trace": traceback.format_exc()}
 
 
-def _run_batch_views(task_id, urls):
-    """后台线程：批量抓取视频最新 View"""
+def _run_batch_views(task_id, urls, excel_path=None):
+    """后台线程：批量抓取视频最新 View，可选回填到 Excel"""
     results = []
     for i, url in enumerate(urls):
         _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{len(urls)}..."}
@@ -769,7 +776,84 @@ def _run_batch_views(task_id, urls):
             })
         except Exception as e:
             results.append({"url": url, "platform": platform, "error": str(e)})
-    _async_tasks[task_id] = {"status": "done", "result": {"videos": results, "total": len(results)}}
+
+    result_data = {"videos": results, "total": len(results)}
+
+    # 如果有 Excel，回填 View 并生成下载文件
+    download_url = None
+    if excel_path and os.path.exists(excel_path):
+        try:
+            download_url = _fill_views_to_excel(excel_path, results)
+        except Exception as e:
+            result_data["excel_error"] = str(e)
+
+    result_data["download_url"] = download_url
+    _async_tasks[task_id] = {"status": "done", "result": result_data}
+
+
+def _fill_views_to_excel(tmp_path, results):
+    """回填 View 到原 Excel，保留原格式，生成下载文件"""
+    from openpyxl import load_workbook
+    from openpyxl.styles import numbers
+
+    wb = load_workbook(tmp_path, data_only=True)
+    ws = wb.active
+
+    # 构建 url → views 映射
+    view_map = {}
+    for r in results:
+        u = r.get("url", "")
+        v = r.get("views")
+        if u and v is not None:
+            view_map[u] = v
+
+    # 找表头
+    headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
+    url_col = None
+    for i, h in enumerate(headers):
+        if h in ['url', '链接', '视频链接', 'video_url', 'link']:
+            url_col = i
+            break
+
+    if url_col is None:
+        # 无表头，扫描找链接列
+        for col_idx in range(1, ws.max_column + 1):
+            cell_val = str(ws.cell(row=1, column=col_idx).value or '')
+            for row_idx in range(2, min(ws.max_row + 1, 5)):
+                val = str(ws.cell(row=row_idx, column=col_idx).value or '')
+                if 'tiktok.com' in val or 'instagram.com' in val:
+                    url_col = col_idx - 1  # 0-based
+                    break
+            if url_col is not None:
+                break
+
+    if url_col is None:
+        raise Exception("无法在 Excel 中定位 URL 列，无法回填")
+
+    # 找到或创建 View 列（在 URL 列右侧）
+    view_col_idx = url_col + 1  # 1-based
+    # 检查 URL 列右边第一列是不是 "view" / "播放量" / "views"
+    header_right = str(ws.cell(row=1, column=view_col_idx + 1).value or '').strip().lower()
+    if header_right in ['view', 'views', '播放量', '播放', 'view_count', '视频播放量']:
+        view_col_idx = view_col_idx + 1
+
+    # 设置/覆盖 View 列表头
+    ws.cell(row=1, column=view_col_idx + 1).value = 'View'
+
+    # 回填 View 数据
+    for row_idx in range(2, ws.max_row + 1):
+        cell_val = str(ws.cell(row=row_idx, column=url_col + 1).value or '').strip()
+        if cell_val in view_map:
+            ws.cell(row=row_idx, column=view_col_idx + 1).value = view_map[cell_val]
+
+    # 保存到可下载位置
+    download_dir = os.path.join(BASE_DIR, "downloads")
+    os.makedirs(download_dir, exist_ok=True)
+    output_name = f"view_update_{uuid.uuid4().hex[:8]}.xlsx"
+    output_path = os.path.join(download_dir, output_name)
+    wb.save(output_path)
+
+    return f"/downloads/{output_name}"
 
 
 # ============================================================
@@ -830,7 +914,7 @@ def api_videos_views():
 
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_batch_views, args=(task_id, urls))
+        t = threading.Thread(target=_run_batch_views, args=(task_id, urls, None))
         t.daemon = True
         t.start()
         return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
@@ -896,16 +980,15 @@ def api_videos_views_upload():
                     if ('tiktok.com' in s.lower() or 'instagram.com' in s.lower()) and s.startswith('http'):
                         urls.append(s)
 
-        os.remove(tmp_path)
-
         if not urls:
             return jsonify({"error": "未从 Excel 中解析到任何链接，请确保包含 TikTok 或 Instagram 视频链接"}), 400
         if len(urls) > 200:
+            os.remove(tmp_path)
             return jsonify({"error": f"链接数量 {len(urls)} 超过 200 条限制"}), 400
 
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_batch_views, args=(task_id, urls))
+        t = threading.Thread(target=_run_batch_views, args=(task_id, urls, tmp_path))
         t.daemon = True
         t.start()
         return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
