@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_from_directory
+import requests
 from openai import OpenAI
 
 # 异步任务存储（内存字典）
