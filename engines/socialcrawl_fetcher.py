@@ -25,7 +25,7 @@ SOCIALCRAWL_API_KEY = os.environ.get(
 )
 SCRAPECREATORS_API_KEY = os.environ.get(
     "SCRAPECREATORS_API_KEY",
-    "Yun1op59ONdU7wVDnbFKkZ5jWIG2"
+    "YhZY3Y5FfGSom6oKq4MRmtFrWrI2"
 )
 
 # ScrapeCreators endpoints
