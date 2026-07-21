@@ -7,6 +7,7 @@
 import json, os, re, sys, time, hashlib, threading
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
@@ -329,67 +330,79 @@ def api_comments_analysis():
         sponsored_videos.extend(non_sponsored[:needed])
     top3_sponsored = sorted(sponsored_videos, key=lambda v: int(v.get("评论数", 0) or 0), reverse=True)[:3]
 
-    # --- Fetch & classify comments for each video ---
-    def analyze_video_group(video_group, group_label):
-        """Fetch comments + classify for a group of videos"""
+    # --- Fetch & classify comments for each video (parallel for speed) ---
+    def analyze_single_video(v):
+        """Fetch + classify comments for ONE video. Runs inside a worker thread."""
+        url = v.get("视频链接", "")
+        title = v.get("标题", "")
+        native_comment_count = int(v.get("评论数", 0) or 0)
+
+        # Fetch comments from ScrapeCreators
+        comments_raw = []
+        fetch_error = None
+        if url:
+            try:
+                comments_raw = fetch_comments_for_video(url, platform)
+            except Exception as e:
+                fetch_error = str(e)
+
+        valid_comments = get_top_valid_comments(comments_raw, 30)
+
+        # Classify each comment
+        classified = []
+        for c in valid_comments:
+            cat_key, name_en, name_zh, signals = classify_single_comment(c["text"], comment_config)
+            classified.append({
+                "text": c["text"][:200],
+                "likes": c["likes"],
+                "username": c.get("username", "N/A"),
+                "category": name_zh,
+                "category_key": cat_key,
+                "matched_signals": signals,
+            })
+
+        # Distribution for this video
+        dist = defaultdict(lambda: {"count": 0, "pct": 0})
+        for c in classified:
+            dist[c["category_key"]]["count"] += 1
+        total_c = len(classified)
+        for k in dist:
+            dist[k]["pct"] = round(dist[k]["count"] / total_c * 100, 1) if total_c > 0 else 0
+
+        return {
+            "title": title[:120],
+            "url": url,
+            "native_comment_count": native_comment_count,
+            "fetched_comment_count": len(classified),
+            "total_raw_comments": len(comments_raw),
+            "distribution": dict(dist),
+            "classified_comments": classified,
+            "fetch_error": fetch_error,
+            "_classified": classified,  # internal: for group aggregation
+        }
+
+    def _empty_group():
+        return {
+            "videos": [],
+            "aggregate_distribution": {},
+            "total_classified_comments": 0,
+            "purchase_intent_score": 0,
+            "purchase_intent_label": "低购买意向",
+        }
+
+    def analyze_video_group(video_group, analyzed_map):
+        """Assemble a group's result from the pre-fetched analyzed map."""
+        if not video_group:
+            return _empty_group()
+
         video_results = []
         all_classified = []
-
-        for idx, v in enumerate(video_group):
-            url = v.get("视频链接", "")
-            title = v.get("标题", "")
-            native_comment_count = int(v.get("评论数", 0) or 0)
-
-            # Fetch comments from SocialCrawl
-            comments_raw = []
-            fetch_error = None
-            if url:
-                try:
-                    comments_raw = fetch_comments_for_video(url, platform)
-                except Exception as e:
-                    fetch_error = str(e)
-
-            valid_comments = get_top_valid_comments(comments_raw, 30)
-
-            # Classify each comment
-            classified = []
-            for c in valid_comments:
-                cat_key, name_en, name_zh, signals = classify_single_comment(c["text"], comment_config)
-                classified.append({
-                    "text": c["text"][:200],
-                    "likes": c["likes"],
-                    "username": c.get("username", "N/A"),
-                    "category": name_zh,
-                    "category_key": cat_key,
-                    "matched_signals": signals,
-                })
-                all_classified.append({
-                    "text": c["text"][:200],
-                    "likes": c["likes"],
-                    "username": c.get("username", "N/A"),
-                    "category": name_zh,
-                    "category_key": cat_key,
-                    "matched_signals": signals,
-                })
-
-            # Distribution for this video
-            dist = defaultdict(lambda: {"count": 0, "pct": 0})
-            for c in classified:
-                dist[c["category_key"]]["count"] += 1
-            total_c = len(classified)
-            for k in dist:
-                dist[k]["pct"] = round(dist[k]["count"] / total_c * 100, 1) if total_c > 0 else 0
-
-            video_results.append({
-                "title": title[:120],
-                "url": url,
-                "native_comment_count": native_comment_count,
-                "fetched_comment_count": len(classified),
-                "total_raw_comments": len(comments_raw),
-                "distribution": dict(dist),
-                "classified_comments": classified,
-                "fetch_error": fetch_error,
-            })
+        for v in video_group:
+            res = analyzed_map.get(v.get("视频链接", ""))
+            if res is None:
+                continue
+            all_classified.extend(res.get("_classified", []))
+            video_results.append({k: val for k, val in res.items() if k != "_classified"})
 
         # Aggregate distribution across all videos in group
         agg_dist = defaultdict(lambda: {"count": 0, "name_zh": "", "pct": 0})
@@ -413,8 +426,25 @@ def api_comments_analysis():
             "purchase_intent_label": intent_label,
         }
 
-    part1 = analyze_video_group(top3_hot, "hot")
-    part2 = analyze_video_group(top3_sponsored, "sponsored")
+    # --- Fetch ALL unique videos ONCE in parallel (caps total time at ~1 video) ---
+    unique_videos = []
+    _seen = set()
+    for v in (top3_hot + top3_sponsored):
+        u = v.get("视频链接", "")
+        if u and u not in _seen:
+            _seen.add(u)
+            unique_videos.append(v)
+
+    analyzed_map = {}
+    if unique_videos:
+        workers = min(6, len(unique_videos))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(analyze_single_video, v): v.get("视频链接", "") for v in unique_videos}
+            for f in futures:
+                analyzed_map[futures[f]] = f.result()
+
+    part1 = analyze_video_group(top3_hot, analyzed_map)
+    part2 = analyze_video_group(top3_sponsored, analyzed_map)
 
     return jsonify({
         "part1_top3_hot": part1,
