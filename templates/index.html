@@ -1288,10 +1288,12 @@ function renderViewsResults(result) {
         <table class="video-table"><thead><tr><th>平台</th><th>达人</th><th>播放量</th><th>点赞</th><th>评论</th><th>标题</th><th>链接</th></tr></thead><tbody>`;
 
     videos.forEach(v => {
+        const hasError = v.error;
+        const viewsDisplay = hasError ? `<span style="color:#dc2626;font-size:12px">${escHtml(v.error.substring(0,40))}</span>` : fmt(v.views);
         html += `<tr>
             <td>${escHtml(v.platform || '-')}</td>
             <td>${escHtml(v.author || '-')}</td>
-            <td>${fmt(v.views)}</td>
+            <td>${viewsDisplay}</td>
             <td>${fmt(v.likes)}</td>
             <td>${fmt(v.comments)}</td>
             <td>${escHtml((v.title || '').substring(0,80))}</td>

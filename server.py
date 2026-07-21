@@ -815,7 +815,7 @@ def _fill_views_to_excel(tmp_path, results):
     ws = wb.active
 
     # 构建原始 URL → 结果映射，同时处理规范化匹配
-    # key: 规范化后的 URL, value: views
+    # key: 规范化后的 URL, value: {views, error}
     tk_map = {}
     ig_map = {}
     for r in results:
@@ -823,12 +823,14 @@ def _fill_views_to_excel(tmp_path, results):
         nu = _normalize_for_match(u)
         v = r.get("views")
         p = (r.get("platform") or "").lower()
+        err = r.get("error")
         if not nu:
             continue
+        entry = {"views": v, "error": err}
         if "instagram" in p:
-            ig_map[nu] = v if v is not None else None
+            ig_map[nu] = entry
         else:
-            tk_map[nu] = v if v is not None else None
+            tk_map[nu] = entry
 
     # 找 URL 列
     headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
@@ -881,11 +883,19 @@ def _fill_views_to_excel(tmp_path, results):
 
         # 判断平台并回填对应列
         if 'instagram.com' in match_key:
-            if match_key in ig_map:
-                ws.cell(row=row_idx, column=ig_view_col + 1).value = ig_map[match_key]
+            entry = ig_map.get(match_key)
+            if entry:
+                if entry.get("views") is not None:
+                    ws.cell(row=row_idx, column=ig_view_col + 1).value = entry["views"]
+                elif entry.get("error"):
+                    ws.cell(row=row_idx, column=ig_view_col + 1).value = f"失败: {entry['error'][:30]}"
         elif 'tiktok.com' in match_key:
-            if match_key in tk_map:
-                ws.cell(row=row_idx, column=tk_view_col + 1).value = tk_map[match_key]
+            entry = tk_map.get(match_key)
+            if entry:
+                if entry.get("views") is not None:
+                    ws.cell(row=row_idx, column=tk_view_col + 1).value = entry["views"]
+                elif entry.get("error"):
+                    ws.cell(row=row_idx, column=tk_view_col + 1).value = f"失败: {entry['error'][:30]}"
 
     # 保存
     download_dir = os.path.join(BASE_DIR, "downloads")
