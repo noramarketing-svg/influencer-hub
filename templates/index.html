@@ -302,9 +302,18 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <div id="panel-3" class="panel hidden">
     <div class="input-panel">
         <h2 style="margin-bottom:16px">📤 批量视频 View 更新</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:12px">上传 Excel 表格，需包含一列名为 <code>url</code> 的视频链接（TikTok / Instagram 可混排）。</p>
-        <input type="file" id="views-excel-input" accept=".xlsx,.xls" style="padding:8px 0;font-size:14px">
-        <button class="btn" id="views-upload-btn" onclick="uploadViewsExcel()" style="margin-top:12px">上传并更新 View</button>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">从 Excel 分别复制 TK 链接列和 IG 链接列，粘贴到下方。抓取完成后一键复制 View 列粘贴回 Excel。</p>
+        <div style="display:flex;gap:16px;margin-bottom:12px">
+            <div style="flex:1">
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">🎵 TikTok 链接（从 A 列复制）</label>
+                <textarea id="paste-tk-urls" placeholder="https://www.tiktok.com/@user/video/123&#10;https://www.tiktok.com/@user/video/456" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+            </div>
+            <div style="flex:1">
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">📸 Instagram 链接（从 B 列复制）</label>
+                <textarea id="paste-ig-urls" placeholder="https://www.instagram.com/reel/ABC/&#10;https://www.instagram.com/reel/DEF/" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+            </div>
+        </div>
+        <button class="btn" id="views-paste-btn" onclick="fetchPasteViews()" style="margin-top:8px">🔍 开始抓取 View</button>
         <div class="status" id="views-status"></div>
     </div>
     <div id="views-results-area" class="hidden"></div>
@@ -1207,30 +1216,33 @@ function renderSingleVideoResults(result) {
     `;
 }
 
-// ============ Panel 3: Bulk Views Update ============
+// ============ Panel 3: Bulk Views Update (Paste Mode) ============
 let viewsAbortController = null;
 
-async function uploadViewsExcel() {
-    const input = document.getElementById('views-excel-input');
+async function fetchPasteViews() {
     const status = document.getElementById('views-status');
-    const btn = document.getElementById('views-upload-btn');
+    const btn = document.getElementById('views-paste-btn');
     const resultsArea = document.getElementById('views-results-area');
 
-    if (!input.files || !input.files[0]) { status.innerHTML = '<span class="error">请选择 Excel 文件</span>'; return; }
+    const tkRaw = document.getElementById('paste-tk-urls').value.trim();
+    const igRaw = document.getElementById('paste-ig-urls').value.trim();
+
+    if (!tkRaw && !igRaw) {
+        status.innerHTML = '<span class="error">请至少在一个框中粘贴链接</span>';
+        return;
+    }
 
     btn.disabled = true;
     resultsArea.classList.add('hidden');
-    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在上传并解析 Excel...';
-
-    const formData = new FormData();
-    formData.append('file', input.files[0]);
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在提交...';
 
     viewsAbortController = new AbortController();
 
     try {
-        const resp = await fetch('/api/videos/views/upload', {
+        const resp = await fetch('/api/videos/views/paste', {
             method: 'POST',
-            body: formData,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tk_urls: tkRaw, ig_urls: igRaw }),
             signal: viewsAbortController.signal
         });
         const initData = await resp.json();
@@ -1242,15 +1254,15 @@ async function uploadViewsExcel() {
         while (true) {
             await new Promise(r => setTimeout(r, 3000));
             elapsed += 3;
-            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在抓取 ${total} 条视频的 View... (已等待 ${elapsed}s)`;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在抓取 ${total} 行 View... (已等待 ${elapsed}s)`;
 
-            const pollResp = await fetch('/api/videos/views/status/' + taskId, {signal: viewsAbortController.signal});
+            const pollResp = await fetch('/api/videos/views/status/' + taskId, { signal: viewsAbortController.signal });
             if (viewsAbortController.signal.aborted) return;
             const pollData = await pollResp.json();
 
             if (pollData.status === 'done') {
-                status.innerHTML = '<span class="ok">✅ View 更新完成</span>';
-                renderViewsResults(pollData.result);
+                status.innerHTML = '<span class="ok">✅ View 抓取完成</span>';
+                renderPasteViewsResults(pollData.result);
                 resultsArea.classList.remove('hidden');
                 break;
             } else if (pollData.status === 'error') {
@@ -1262,11 +1274,11 @@ async function uploadViewsExcel() {
                 break;
             }
         }
-    } catch(e) {
+    } catch (e) {
         if (viewsAbortController.signal.aborted) {
             status.innerHTML = '<span class="error">已停止</span>';
         } else {
-            status.innerHTML = `<span class="error">上传失败: ${e.message}</span>`;
+            status.innerHTML = `<span class="error">请求失败: ${e.message}</span>`;
         }
     } finally {
         btn.disabled = false;
@@ -1274,78 +1286,91 @@ async function uploadViewsExcel() {
     }
 }
 
-function renderViewsResults(result) {
+function renderPasteViewsResults(result) {
     const container = document.getElementById('views-results-area');
-    const videos = result.videos || [];
-    if (!videos.length) {
+    const rows = result.rows || [];
+    if (!rows.length) {
         container.innerHTML = '<div class="section"><p class="text-sm">无结果</p></div>';
         return;
     }
 
     const fmt = n => n === null || n === undefined ? '-' : Number(n).toLocaleString();
-    let html = `<div class="section"><h2>📊 最新 View 数据</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:12px">共 ${videos.length} 条链接</p>
-        <table class="video-table"><thead><tr><th>平台</th><th>达人</th><th>播放量</th><th>点赞</th><th>评论</th><th>标题</th><th>链接</th></tr></thead><tbody>`;
+    let tkCopyData = [];
+    let igCopyData = [];
 
-    videos.forEach(v => {
-        const hasError = v.error;
-        const viewsDisplay = hasError ? `<span style="color:#dc2626;font-size:12px">${escHtml(v.error.substring(0,40))}</span>` : fmt(v.views);
+    let html = `<div class="section"><h2>📊 View 数据（按行对齐）</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:8px">共 ${rows.length} 行。点击下方按钮一键复制整列，粘贴回 Excel 的 C 列 / D 列。</p>
+        <table class="video-table"><thead><tr><th>#</th><th>TK View</th><th>IG View</th><th>状态</th></tr></thead><tbody>`;
+
+    rows.forEach((row, i) => {
+        const tkViews = row.tk_view;
+        const igViews = row.ig_view;
+        const tkErr = row.tk_error;
+        const igErr = row.ig_error;
+
+        let tkDisplay = '-', igDisplay = '-';
+        if (tkErr) { tkDisplay = `<span style="color:#dc2626;font-size:12px">⚠</span>`; tkCopyData.push('ERROR'); }
+        else if (tkViews !== null && tkViews !== undefined) { tkDisplay = fmt(tkViews); tkCopyData.push(String(tkViews)); }
+        else { tkCopyData.push(''); }
+
+        if (igErr) { igDisplay = `<span style="color:#dc2626;font-size:12px">⚠</span>`; igCopyData.push('ERROR'); }
+        else if (igViews !== null && igViews !== undefined) { igDisplay = fmt(igViews); igCopyData.push(String(igViews)); }
+        else { igCopyData.push(''); }
+
+        let statusText = '';
+        if (tkErr && igErr) statusText = '<span style="color:#dc2626">TK+IG 均失败</span>';
+        else if (tkErr) statusText = '<span style="color:#dc2626">TK 失败</span>';
+        else if (igErr) statusText = '<span style="color:#dc2626">IG 失败</span>';
+        else statusText = '<span style="color:#059669">OK</span>';
+
         html += `<tr>
-            <td>${escHtml(v.platform || '-')}</td>
-            <td>${escHtml(v.author || '-')}</td>
-            <td>${viewsDisplay}</td>
-            <td>${fmt(v.likes)}</td>
-            <td>${fmt(v.comments)}</td>
-            <td>${escHtml((v.title || '').substring(0,80))}</td>
-            <td>${v.url ? `<a href="${escHtml(v.url)}" class="video-link" target="_blank" rel="noopener">🔗 打开</a>` : '-'}</td>
+            <td>${i + 1}</td>
+            <td>${tkDisplay}</td>
+            <td>${igDisplay}</td>
+            <td>${statusText}</td>
         </tr>`;
     });
     html += '</tbody></table>';
 
-    // Excel 下载按钮：优先用服务器回填的 Excel，否则用前端 CSV
-    if (result.download_url) {
-        html += `<div style="margin-top:16px">
-            <a href="${result.download_url}" class="btn" style="text-decoration:none;display:inline-block">📥 下载回填 View 的 Excel（原格式）</a>
-        </div>`;
-    } else {
-        html += `<div style="margin-top:16px"><button class="btn" onclick="downloadViewsExcel()">📥 下载 View 数据 (CSV)</button></div>`;
-    }
+    // 一键复制按钮
+    html += `<div style="margin-top:16px;display:flex;gap:12px;align-items:center">
+        <button class="btn" onclick="copyColumn('tk')" id="btn-copy-tk">📋 一键复制 TK View 列</button>
+        <button class="btn" onclick="copyColumn('ig')" id="btn-copy-ig">📋 一键复制 IG View 列</button>
+        <span class="text-sm" id="copy-msg"></span>
+    </div>`;
     html += '</div>';
     container.innerHTML = html;
-    // 保存数据供前端 CSV 下载使用
-    window._viewsResultData = videos;
+
+    // 保存复制数据
+    window._tkCopyData = tkCopyData;
+    window._igCopyData = igCopyData;
 }
 
-function downloadViewsExcel() {
-    const videos = window._viewsResultData || [];
-    if (!videos.length) { alert('暂无数据可下载'); return; }
+async function copyColumn(type) {
+    const data = type === 'tk' ? window._tkCopyData : window._igCopyData;
+    if (!data || !data.length) return;
 
-    // 构建 CSV 内容
-    const headers = ['平台', '达人', '播放量', '点赞', '评论', '标题', '链接'];
-    const rows = videos.map(v => [
-        v.platform || '',
-        v.author || '',
-        v.views !== null && v.views !== undefined ? v.views : '',
-        v.likes !== null && v.likes !== undefined ? v.likes : '',
-        v.comments !== null && v.comments !== undefined ? v.comments : '',
-        (v.title || '').replace(/"/g, '""'),
-        v.url || ''
-    ]);
-
-    // CSV 编码（处理中文）
-    const csvContent = '\uFEFF' + [headers, ...rows].map(r =>
-        r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-    ).join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    const now = new Date().toISOString().slice(0, 10);
-    link.download = `view_update_${now}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
+    const text = data.join('\n');
+    try {
+        await navigator.clipboard.writeText(text);
+        const msg = document.getElementById('copy-msg');
+        const label = type === 'tk' ? 'TK View' : 'IG View';
+        msg.innerHTML = `<span class="ok">✅ ${label} 已复制（${data.length} 行），去 Excel 粘贴吧</span>`;
+        setTimeout(() => { msg.innerHTML = ''; }, 3000);
+    } catch (e) {
+        // 回退方案：选中 textarea 手动复制
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const msg = document.getElementById('copy-msg');
+        msg.innerHTML = `<span class="ok">✅ 已复制，去 Excel 粘贴</span>`;
+        setTimeout(() => { msg.innerHTML = ''; }, 3000);
+    }
 }
 
 // ============ API Key Management ============

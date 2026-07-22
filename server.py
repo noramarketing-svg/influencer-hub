@@ -793,6 +793,42 @@ def _run_batch_views(task_id, urls, excel_path=None):
     _async_tasks[task_id] = {"status": "done", "result": result_data}
 
 
+def _run_batch_views_paste(task_id, tk_urls, ig_urls):
+    """后台线程：双列 URL 批量抓取，按行合并 TK 和 IG 结果"""
+    max_rows = max(len(tk_urls), len(ig_urls))
+    rows = []
+
+    for i in range(max_rows):
+        _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{max_rows}..."}
+        row = {"tk_view": None, "ig_view": None, "tk_url": None, "ig_url": None, "tk_error": None, "ig_error": None}
+
+        # 抓取 TK（如果此行有 TK URL）
+        if i < len(tk_urls) and tk_urls[i].strip():
+            tk_url = tk_urls[i].strip()
+            row["tk_url"] = tk_url
+            try:
+                normalized = _normalize_url(tk_url)
+                meta = _fetch_video_metadata_sc(normalized, "TikTok")
+                row["tk_view"] = meta.get("views")
+            except Exception as e:
+                row["tk_error"] = str(e)
+
+        # 抓取 IG（如果此行有 IG URL）
+        if i < len(ig_urls) and ig_urls[i].strip():
+            ig_url = ig_urls[i].strip()
+            row["ig_url"] = ig_url
+            try:
+                normalized = _normalize_url(ig_url)
+                meta = _fetch_video_metadata_sc(normalized, "Instagram")
+                row["ig_view"] = meta.get("views")
+            except Exception as e:
+                row["ig_error"] = str(e)
+
+        rows.append(row)
+
+    _async_tasks[task_id] = {"status": "done", "result": {"rows": rows, "total": len(rows)}}
+
+
 def _extract_video_id(url):
     """从 URL 中提取视频唯一标识（shortcode / video ID），用于可靠匹配"""
     if not url:
@@ -1034,6 +1070,44 @@ def api_videos_views_upload():
         t.daemon = True
         t.start()
         return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/videos/views/paste", methods=["POST"])
+def api_videos_views_paste():
+    """双列粘贴 URL 批量抓取 View（异步）"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "请提供数据"}), 400
+
+        # 解析 TK 和 IG URL 列表
+        tk_input = data.get("tk_urls", [])
+        ig_input = data.get("ig_urls", [])
+
+        # 支持粘贴文本（按行分割）
+        if isinstance(tk_input, str):
+            tk_input = [u.strip() for u in tk_input.strip().split("\n") if u.strip()]
+        if isinstance(ig_input, str):
+            ig_input = [u.strip() for u in ig_input.strip().split("\n") if u.strip()]
+
+        tk_urls = [u for u in tk_input if u]
+        ig_urls = [u for u in ig_input if u]
+
+        total = max(len(tk_urls), len(ig_urls))
+        if total == 0:
+            return jsonify({"error": "请至少输入一个链接"}), 400
+        if total > 200:
+            return jsonify({"error": f"链接数量 {total} 超过 200 条限制"}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
+        t = threading.Thread(target=_run_batch_views_paste, args=(task_id, tk_urls, ig_urls))
+        t.daemon = True
+        t.start()
+        return jsonify({"task_id": task_id, "status": "started", "total": total})
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
