@@ -348,6 +348,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 
         <div class="modal-actions">
             <button class="btn btn-secondary" onclick="closeSettingsModal()">取消</button>
+            <button class="btn" onclick="refreshCredits()" style="background:#059669">🔄 刷新额度</button>
             <button class="btn" onclick="saveApiKeys()">保存并更新</button>
         </div>
     </div>
@@ -1404,7 +1405,41 @@ async function loadCredits() {
         } else {
             document.getElementById('apify-credits').textContent = '';
         }
-    } catch(e) { console.error('load credits failed', e); }
+        return {ok: true};
+    } catch(e) { 
+        console.error('load credits failed', e); 
+        return {ok: false, error: e.message};
+    }
+}
+
+async function refreshCredits() {
+    const btn = document.querySelector('button[onclick="refreshCredits()"]');
+    const originalText = btn.textContent;
+    btn.textContent = '🔄 刷新中...';
+    btn.disabled = true;
+    
+    const result = await loadCredits();
+    
+    btn.textContent = originalText;
+    btn.disabled = false;
+    
+    const msg = document.getElementById('refresh-msg');
+    if (!msg) {
+        // 动态创建提示元素
+        const hint = document.querySelector('.modal-actions');
+        const span = document.createElement('span');
+        span.id = 'refresh-msg';
+        span.style.marginRight = '12px';
+        span.style.fontSize = '13px';
+        hint.insertBefore(span, hint.firstChild);
+    }
+    const msgEl = document.getElementById('refresh-msg');
+    if (result.ok) {
+        msgEl.innerHTML = '<span class="ok">✅ 刷新成功</span>';
+    } else {
+        msgEl.innerHTML = `<span class="error">❌ 刷新失败: ${escHtml(result.error)}</span>`;
+    }
+    setTimeout(() => { msgEl.textContent = ''; }, 3000);
 }
 
 function updateSettingsUI() {
