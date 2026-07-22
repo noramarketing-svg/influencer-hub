@@ -1087,14 +1087,21 @@ def api_videos_views_paste():
         tk_input = data.get("tk_urls", [])
         ig_input = data.get("ig_urls", [])
 
-        # 支持粘贴文本（按行分割）
+        # 支持粘贴文本（按行分割，保留空行以对齐 Excel 行号）
         if isinstance(tk_input, str):
-            tk_input = [u.strip() for u in tk_input.strip().split("\n") if u.strip()]
+            tk_input = tk_input.rstrip("\n").split("\n")
         if isinstance(ig_input, str):
-            ig_input = [u.strip() for u in ig_input.strip().split("\n") if u.strip()]
+            ig_input = ig_input.rstrip("\n").split("\n")
 
-        tk_urls = [u for u in tk_input if u]
-        ig_urls = [u for u in ig_input if u]
+        # 去掉每行前后空白，但保留空字符串（表示该行无 URL）
+        tk_urls = [u.strip() if u else "" for u in tk_input]
+        ig_urls = [u.strip() if u else "" for u in ig_input]
+
+        # 去掉末尾连续的空行（不影响中间的空行）
+        while tk_urls and not tk_urls[-1]:
+            tk_urls.pop()
+        while ig_urls and not ig_urls[-1]:
+            ig_urls.pop()
 
         total = max(len(tk_urls), len(ig_urls))
         if total == 0:
