@@ -1097,13 +1097,12 @@ def api_videos_views_paste():
         tk_urls = [u.strip() if u else "" for u in tk_input]
         ig_urls = [u.strip() if u else "" for u in ig_input]
 
-        # 去掉末尾连续的空行（不影响中间的空行）
-        while tk_urls and not tk_urls[-1]:
-            tk_urls.pop()
-        while ig_urls and not ig_urls[-1]:
-            ig_urls.pop()
-
+        # 取最大行数，短的列在末尾补空行（保留用户输入的空行位置不变）
         total = max(len(tk_urls), len(ig_urls))
+        while len(tk_urls) < total:
+            tk_urls.append("")
+        while len(ig_urls) < total:
+            ig_urls.append("")
         if total == 0:
             return jsonify({"error": "请至少输入一个链接"}), 400
         if total > 200:
