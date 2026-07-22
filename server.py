@@ -636,7 +636,11 @@ def _check_apify_credits():
                                   headers={"Authorization": f"Bearer {APIFY_API_KEY}"}, timeout=10)
                 if r2.status_code == 200:
                     u = r2.json().get("data", {})
-                    return {"remaining": u.get("remainingUsd", 0), "used": u.get("usedUsd", 0)}
+                    used = u.get("totalUsageCreditsUsdAfterVolumeDiscount", 0)
+                    # Apify 免费额度 $5/月
+                    free_tier = 5.0
+                    remaining = max(0, free_tier - used)
+                    return {"remaining": round(remaining, 2), "used": round(used, 2), "total": free_tier}
     except Exception:
         pass
     return None
