@@ -2,5 +2,5 @@
 # 通过 /api/config/apify-key 和 /api/config/scrapecreators-key 更新
 
 APIFY_API_KEY = "apify_api_E63BmYZ9pDoU6goXDOr7JCDasZkAgg00v7ZL"
-SCRAPECREATORS_API_KEY = "2iSG0QZ0HDZAImtr7rsV9kFazff2"
+SCRAPECREATORS_API_KEY = "ftzWwoCG61ZG26D5REG0PUXQHO63"
 DEEPSEEK_API_KEY = "sk-022e1d49363743c786043907dad15a98"

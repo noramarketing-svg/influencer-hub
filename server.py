@@ -823,12 +823,17 @@ def _fill_views_to_excel(tmp_path, results):
         u = r.get("url", "") or r.get("normalized_url", "")
         vid = _extract_video_id(u)
         if not vid:
+            print(f"[fill_views] SKIP no vid from url: {u[:80]}")
             continue
         entry = {"views": r.get("views"), "error": r.get("error")}
         if vid.startswith("IG_"):
             ig_map[vid] = entry
+            print(f"[fill_views] IG map: {vid} -> views={r.get('views')}, err={r.get('error','')[:30]}")
         else:
             tk_map[vid] = entry
+            print(f"[fill_views] TK map: {vid} -> views={r.get('views')}")
+
+    print(f"[fill_views] total: TK={len(tk_map)}, IG={len(ig_map)}")
 
     # 找 URL 列：先找表头，再扫描内容
     headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
@@ -872,12 +877,15 @@ def _fill_views_to_excel(tmp_path, results):
         ws.cell(row=1, column=ig_view_col + 1).value = 'IG View'
 
     # 回填数据：用视频 ID 匹配，不依赖 URL 全文
+    filled_ig = 0
+    filled_tk = 0
     for row_idx in range(2, ws.max_row + 1):
         cell_val = str(ws.cell(row=row_idx, column=url_col + 1).value or '').strip()
         if not cell_val:
             continue
         vid = _extract_video_id(cell_val)
         if not vid:
+            print(f"[fill_views] Row {row_idx}: no vid from '{cell_val[:60]}'")
             continue
 
         if vid.startswith("IG_"):
@@ -885,15 +893,24 @@ def _fill_views_to_excel(tmp_path, results):
             if entry:
                 if entry.get("views") is not None:
                     ws.cell(row=row_idx, column=ig_view_col + 1).value = entry["views"]
+                    filled_ig += 1
+                    print(f"[fill_views] Row {row_idx}: IG {vid} -> {entry['views']}")
                 elif entry.get("error"):
                     ws.cell(row=row_idx, column=ig_view_col + 1).value = f"失败: {entry['error'][:30]}"
+            else:
+                print(f"[fill_views] Row {row_idx}: IG {vid} NOT FOUND in ig_map (keys: {list(ig_map.keys())[:5]})")
         elif vid.startswith("TK_"):
             entry = tk_map.get(vid)
             if entry:
                 if entry.get("views") is not None:
                     ws.cell(row=row_idx, column=tk_view_col + 1).value = entry["views"]
+                    filled_tk += 1
                 elif entry.get("error"):
                     ws.cell(row=row_idx, column=tk_view_col + 1).value = f"失败: {entry['error'][:30]}"
+            else:
+                print(f"[fill_views] Row {row_idx}: TK {vid} NOT FOUND in tk_map")
+
+    print(f"[fill_views] Done: filled TK={filled_tk}, IG={filled_ig}")
 
     # 保存
     download_dir = os.path.join(BASE_DIR, "downloads")
@@ -903,13 +920,6 @@ def _fill_views_to_excel(tmp_path, results):
     wb.save(output_path)
 
     return f"/downloads/{output_name}"
-
-    # 保存到可下载位置
-    download_dir = os.path.join(BASE_DIR, "downloads")
-    os.makedirs(download_dir, exist_ok=True)
-    output_name = f"view_update_{uuid.uuid4().hex[:8]}.xlsx"
-    output_path = os.path.join(download_dir, output_name)
-    wb.save(output_path)
 
     return f"/downloads/{output_name}"
 
@@ -1210,7 +1220,7 @@ def api_config_deepseek_key():
 
 
 def _update_config_key(var_name, new_value):
-    """更新 configs/api_keys.py 中的变量值"""
+    """更新 configs/api_keys.py 中的变量值，并尝试 git commit + push 到 GitHub"""
     config_path = os.path.join(BASE_DIR, "configs", "api_keys.py")
     with open(config_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -1226,6 +1236,18 @@ def _update_config_key(var_name, new_value):
 
     with open(config_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+    # 尝试 git commit + push（如果在 Render 环境有 git 权限）
+    try:
+        import subprocess
+        git_dir = os.path.join(BASE_DIR, ".git")
+        if os.path.exists(git_dir):
+            subprocess.run(["git", "add", "configs/api_keys.py"], cwd=BASE_DIR, capture_output=True, timeout=10)
+            subprocess.run(["git", "commit", "-m", f"chore: update {var_name}"], cwd=BASE_DIR, capture_output=True, timeout=10)
+            subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True, timeout=15)
+            print(f"[config] Git pushed {var_name}")
+    except Exception as e:
+        print(f"[config] Git push skipped: {e}")
 
 
 # ============================================================
