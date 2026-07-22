@@ -5,3 +5,4 @@ reports/
 classified_results.xlsx
 *.log
 .env
+downloads/

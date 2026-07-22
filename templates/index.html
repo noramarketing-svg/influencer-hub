@@ -302,7 +302,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <div id="panel-3" class="panel hidden">
     <div class="input-panel">
         <h2 style="margin-bottom:16px">📤 批量视频 View 更新</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:12px">从 Excel 分别复制 TK 链接列和 IG 链接列，粘贴到下方。抓取完成后一键复制 View 列粘贴回 Excel。</p>
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">从 Excel 整列复制粘贴（含空单元格）。TK 列决定总行数，IG 列不足自动在前面补空行。抓取完成后一键复制 View 列粘贴回 Excel。</p>
         <div style="display:flex;gap:16px;margin-bottom:12px">
             <div style="flex:1">
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">🎵 TikTok 链接（从 A 列复制）</label>
@@ -324,20 +324,20 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 
 <!-- API Settings Modal -->
 <div id="settings-modal" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal" style="max-width:520px">
         <h2>⚙️ API Key 设置</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:16px">当某个 API 额度用完时，在此处输入新 Key 即可自动更新。Key 会保存在服务器上。</p>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">支持多个 Key（英文逗号分隔），第一个用完自动切换下一个。</p>
 
         <div class="input-group">
             <label>ScrapeCreators API Key <span id="sc-status" class="key-status missing">未设置</span></label>
-            <input type="text" id="sc-key-input" placeholder="粘贴 ScrapeCreators API Key">
-            <div class="hint">用于视频数据、口播转录、评论抓取</div>
+            <input type="text" id="sc-key-input" placeholder="key1,key2,key3（多个用逗号分隔）">
+            <div class="hint">用于视频数据、View 抓取、口播转录 | <span id="sc-credits" style="color:#4472C4"></span></div>
         </div>
 
         <div class="input-group">
             <label>Apify API Key <span id="apify-status" class="key-status missing">未设置</span></label>
             <input type="text" id="apify-key-input" placeholder="粘贴 Apify API Key">
-            <div class="hint">用于抓取达人视频列表</div>
+            <div class="hint">用于抓取达人视频列表 | <span id="apify-credits" style="color:#4472C4"></span></div>
         </div>
 
         <div class="input-group">
@@ -1384,20 +1384,48 @@ async function loadApiKeyStatus() {
     } catch(e) { console.error('load keys failed', e); }
 }
 
+async function loadCredits() {
+    try {
+        const resp = await fetch('/api/config/credits');
+        const credits = await resp.json();
+        const sc = credits.scrapecreators;
+        const ap = credits.apify;
+        if (sc && sc.keys) {
+            const parts = sc.keys.map(k => 
+                `${k.masked}: ${k.status === 'active' ? '✅' : k.status === 'exhausted' ? '💰用完' : '❓'}`
+            );
+            document.getElementById('sc-credits').textContent = parts.join(' | ');
+        } else {
+            document.getElementById('sc-credits').textContent = '';
+        }
+        if (ap && !ap.error) {
+            document.getElementById('apify-credits').textContent = 
+                `剩余 $${ap.remaining?.toFixed(2) || '?'}`;
+        } else {
+            document.getElementById('apify-credits').textContent = '';
+        }
+    } catch(e) { console.error('load credits failed', e); }
+}
+
 function updateSettingsUI() {
-    const setStatus = (id, info) => {
+    const setStatus = (id, info, extra) => {
         const el = document.getElementById(id);
         if (!el || !info) return;
-        el.textContent = info.set ? `已设置 (${info.masked})` : '未设置';
+        let text = info.set ? `已设置 (${info.masked})` : '未设置';
+        if (extra) text += ' ' + extra;
+        el.textContent = text;
         el.className = 'key-status ' + (info.set ? 'ok' : 'missing');
     };
-    setStatus('sc-status', apiKeyStatus.scrapecreators);
+    const sc = apiKeyStatus.scrapecreators;
+    const scExtra = (sc && sc.count > 1) ? `[${sc.count} 个 Key]` : '';
+    setStatus('sc-status', sc, scExtra);
     setStatus('apify-status', apiKeyStatus.apify);
     setStatus('deepseek-status', apiKeyStatus.deepseek);
 }
 
 function openSettingsModal() {
     loadApiKeyStatus();
+    loadCredits();
     document.getElementById('settings-modal').classList.remove('hidden');
 }
 

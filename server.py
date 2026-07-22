@@ -20,16 +20,18 @@ sys.path.insert(0, os.path.join(BASE_DIR, "configs"))
 import api_keys as _api_keys
 
 def reload_api_keys():
-    """重新加载 configs/api_keys.py"""
+    """重新加载 configs/api_keys.py，支持多 Key（逗号分隔）"""
     import importlib
     importlib.reload(_api_keys)
-    global SC_API_KEY, SC_HEADERS, DEEPSEEK_API_KEY, DEEPSEEK_CLIENT, APIFY_API_KEY
-    SC_API_KEY = getattr(_api_keys, "SCRAPECREATORS_API_KEY", "")
+    global SC_API_KEYS, SC_API_KEY, SC_HEADERS, DEEPSEEK_API_KEY, DEEPSEEK_CLIENT, APIFY_API_KEY
+    # ScrapeCreators 支持多 Key：取第一个作为当前 active
+    raw_sc = getattr(_api_keys, "SCRAPECREATORS_API_KEY", "")
+    SC_API_KEYS = [k.strip() for k in raw_sc.split(",") if k.strip()]
+    SC_API_KEY = SC_API_KEYS[0] if SC_API_KEYS else ""
     SC_HEADERS = {"x-api-key": SC_API_KEY}
     DEEPSEEK_API_KEY = getattr(_api_keys, "DEEPSEEK_API_KEY", "")
     DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
     APIFY_API_KEY = getattr(_api_keys, "APIFY_API_KEY", "")
-    # 同步更新 engine 模块中的 Key
     try:
         import socialcrawl_fetcher
         socialcrawl_fetcher.SCRAPECREATORS_API_KEY = SC_API_KEY
@@ -557,11 +559,94 @@ def _detect_platform(url):
     return ""
 
 
+# ============ 多 Key 轮换 + 额度查询 ============
+
+# 记录当前 active 的 ScrapeCreators key 索引
+_sc_key_index = 0
+_sc_key_lock = threading.Lock()
+
+def _get_active_sc_key():
+    global _sc_key_index
+    with _sc_key_lock:
+        if not SC_API_KEYS:
+            return ""
+        return SC_API_KEYS[_sc_key_index % len(SC_API_KEYS)]
+
+def _rotate_sc_key():
+    global _sc_key_index
+    with _sc_key_lock:
+        if len(SC_API_KEYS) <= 1:
+            return False
+        _sc_key_index = (_sc_key_index + 1) % len(SC_API_KEYS)
+        return True
+
+def _sc_request(method, url, **kwargs):
+    """带自动轮换的 ScrapeCreators 请求：402 时自动切下一个 key"""
+    timeout = kwargs.pop("timeout", 30)
+    for attempt in range(len(SC_API_KEYS)):
+        key = _get_active_sc_key()
+        headers = {"x-api-key": key}
+        try:
+            r = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+            if r.status_code == 402:
+                if not _rotate_sc_key():
+                    break
+                continue
+            return r
+        except requests.exceptions.RequestException:
+            if attempt + 1 >= len(SC_API_KEYS):
+                raise
+            _rotate_sc_key()
+    return requests.request(method, url, headers={"x-api-key": SC_API_KEYS[0]}, timeout=timeout, **kwargs)
+
+def _check_sc_credits():
+    """查询 ScrapeCreators 各 Key 的状态（通过轻量测试请求判断）"""
+    if not SC_API_KEYS:
+        return {"keys": [], "active": 0}
+    keys_status = []
+    active_idx = 0
+    for i, key in enumerate(SC_API_KEYS):
+        try:
+            r = requests.get("https://api.scrapecreators.com/v2/tiktok/video",
+                             params={"url": "https://www.tiktok.com/@test/video/1"},
+                             headers={"x-api-key": key}, timeout=10)
+            if r.status_code == 402:
+                keys_status.append({"index": i, "masked": _mask_key(key), "status": "exhausted"})
+            elif r.status_code in (200, 404):
+                keys_status.append({"index": i, "masked": _mask_key(key), "status": "active"})
+                if i == _sc_key_index % len(SC_API_KEYS):
+                    active_idx = i
+            else:
+                keys_status.append({"index": i, "masked": _mask_key(key), "status": f"error_{r.status_code}"})
+        except Exception as e:
+            keys_status.append({"index": i, "masked": _mask_key(key), "status": f"error: {str(e)[:30]}"})
+    return {"keys": keys_status, "active": active_idx, "total": len(SC_API_KEYS)}
+
+def _check_apify_credits():
+    """查询 Apify 剩余额度"""
+    if not APIFY_API_KEY:
+        return None
+    try:
+        r = requests.get("https://api.apify.com/v2/users/me",
+                         headers={"Authorization": f"Bearer {APIFY_API_KEY}"}, timeout=10)
+        if r.status_code == 200:
+            uid = r.json().get("data", {}).get("id")
+            if uid:
+                r2 = requests.get(f"https://api.apify.com/v2/users/{uid}/usage/monthly",
+                                  headers={"Authorization": f"Bearer {APIFY_API_KEY}"}, timeout=10)
+                if r2.status_code == 200:
+                    u = r2.json().get("data", {})
+                    return {"remaining": u.get("remainingUsd", 0), "used": u.get("usedUsd", 0)}
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_video_metadata_sc(url, platform):
-    """通过 ScrapeCreators 获取单视频基础数据"""
+    """通过 ScrapeCreators 获取单视频基础数据（自动轮换 Key）"""
     platform_lower = (platform or "").lower()
     if "tiktok" in platform_lower:
-        r = requests.get("https://api.scrapecreators.com/v2/tiktok/video", params={"url": url}, headers=SC_HEADERS, timeout=30)
+        r = _sc_request("GET", "https://api.scrapecreators.com/v2/tiktok/video", params={"url": url}, timeout=30)
         if r.status_code != 200:
             _raise_sc_error(r, "TikTok", url)
         data = r.json()
@@ -584,7 +669,7 @@ def _fetch_video_metadata_sc(url, platform):
             "duration": ad.get("duration", 0),
         }
     elif "instagram" in platform_lower:
-        r = requests.get("https://api.scrapecreators.com/v1/instagram/post", params={"url": url}, headers=SC_HEADERS, timeout=30)
+        r = _sc_request("GET", "https://api.scrapecreators.com/v1/instagram/post", params={"url": url}, timeout=30)
         if r.status_code != 200:
             _raise_sc_error(r, "Instagram", url)
         data = r.json()
@@ -636,10 +721,10 @@ def _fetch_video_metadata_sc(url, platform):
 
 
 def _fetch_transcript_sc(url, platform):
-    """通过 ScrapeCreators 获取视频口播原文"""
+    """通过 ScrapeCreators 获取视频口播原文（自动轮换 Key）"""
     platform_lower = (platform or "").lower()
     if "tiktok" in platform_lower:
-        r = requests.get("https://api.scrapecreators.com/v1/tiktok/video/transcript", params={"url": url, "language": "en"}, headers=SC_HEADERS, timeout=45)
+        r = _sc_request("GET", "https://api.scrapecreators.com/v1/tiktok/video/transcript", params={"url": url, "language": "en"}, timeout=45)
         if r.status_code != 200:
             return None
         data = r.json()
@@ -655,7 +740,7 @@ def _fetch_transcript_sc(url, platform):
             lines.append(line)
         return " ".join(lines)
     elif "instagram" in platform_lower:
-        r = requests.get("https://api.scrapecreators.com/v2/instagram/media/transcript", params={"url": url}, headers=SC_HEADERS, timeout=60)
+        r = _sc_request("GET", "https://api.scrapecreators.com/v2/instagram/media/transcript", params={"url": url}, timeout=60)
         if r.status_code != 200:
             return None
         data = r.json()
@@ -1228,13 +1313,37 @@ def _mask_key(key):
 
 @app.route("/api/config/keys", methods=["GET"])
 def api_config_keys():
-    """获取当前 API Key 状态（掩码显示）"""
+    """获取当前 API Key 状态 + 剩余额度"""
     reload_api_keys()
     return jsonify({
         "apify": {"set": bool(APIFY_API_KEY), "masked": _mask_key(APIFY_API_KEY)},
-        "scrapecreators": {"set": bool(SC_API_KEY), "masked": _mask_key(SC_API_KEY)},
+        "scrapecreators": {
+            "set": bool(SC_API_KEY), 
+            "masked": _mask_key(SC_API_KEY),
+            "count": len(SC_API_KEYS),
+            "keys": [_mask_key(k) for k in SC_API_KEYS],
+        },
         "deepseek": {"set": bool(DEEPSEEK_API_KEY), "masked": _mask_key(DEEPSEEK_API_KEY)},
     })
+
+
+@app.route("/api/config/credits", methods=["GET"])
+def api_config_credits():
+    """查询各 API 剩余额度"""
+    result = {}
+    # ScrapeCreators
+    sc = _check_sc_credits()
+    if sc:
+        result["scrapecreators"] = sc
+    else:
+        result["scrapecreators"] = {"error": "无法查询"}
+    # Apify
+    ap = _check_apify_credits()
+    if ap:
+        result["apify"] = ap
+    else:
+        result["apify"] = {"error": "无法查询"}
+    return jsonify(result)
 
 
 @app.route("/api/config/apify-key", methods=["POST"])
