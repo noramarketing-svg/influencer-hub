@@ -1,0 +1,42 @@
+{
+  "instagram": {
+    "letsdodizz": {
+      "last_fetch": "2026-07-17 09:47:03",
+      "video_count": 25,
+      "newest_video_date": "2026-07-17",
+      "oldest_video_date": "2026-06-19"
+    },
+    "kylekruegerr": {
+      "last_fetch": "2026-07-17 11:34:05",
+      "video_count": 14,
+      "newest_video_date": "2026-07-13",
+      "oldest_video_date": "2026-06-20"
+    },
+    "samsonjc22": {
+      "last_fetch": "2026-07-17 11:34:37",
+      "video_count": 7,
+      "newest_video_date": "2026-07-17",
+      "oldest_video_date": "2026-06-18"
+    }
+  },
+  "tiktok": {
+    "imparkerburton": {
+      "last_fetch": "2026-07-17 10:35:54",
+      "video_count": 29,
+      "newest_video_date": "2026-07-17",
+      "oldest_video_date": "2026-06-18"
+    },
+    "rominagafur": {
+      "last_fetch": "2026-07-17 11:02:34",
+      "video_count": 21,
+      "newest_video_date": "2026-07-16",
+      "oldest_video_date": "2026-06-20"
+    },
+    "reddnea": {
+      "last_fetch": "2026-07-21 16:11:04",
+      "video_count": 15,
+      "newest_video_date": "2026-07-20",
+      "oldest_video_date": "2026-06-22"
+    }
+  }
+}
