@@ -562,6 +562,13 @@ async function fetchCommentAnalysis() {
     const progressText = document.getElementById('comment-progress-text');
     const stopBtn = document.getElementById('comment-stop-btn');
 
+    // Guard: 没有视频数据则跳过
+    if (!allVideos || !allVideos.length) {
+        console.warn('[comments] allVideos is empty, skipping comment analysis');
+        container.classList.add('hidden');
+        return;
+    }
+
     // Abort any existing fetch
     if (commentAbortController) {
         commentAbortController.abort();

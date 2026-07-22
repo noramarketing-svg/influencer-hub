@@ -350,6 +350,7 @@ def api_comments_analysis():
     platform = data.get("platform", "Instagram")
 
     if not videos:
+        print(f"[comments/analysis] ERROR: videos is empty. data keys: {list(data.keys()) if data else 'None'}, videos type: {type(data.get('videos'))}")
         return jsonify({"error": "No videos provided"}), 400
 
     comment_config = load_comment_config()
