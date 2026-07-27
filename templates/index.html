@@ -1700,6 +1700,9 @@ function renderBatchCommentResults(data) {
         </div>`;
     }
 
+    // 评论明细（可折叠）
+    html += renderCommentDetails(v, l);
+
     container.innerHTML = html;
 }
 
@@ -1778,6 +1781,78 @@ function renderEmptyCard(label, accentColor) {
             <strong>${label}</strong>
         </div>
         <p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0">未输入链接</p>
+    </div>`;
+}
+
+function renderCommentDetails(vertical, lifestyle) {
+    const catColors = {
+        content_engagement: '#7F77DD',
+        purchase_intent: '#D4537E',
+        product_interaction: '#1D9E75',
+        other: '#B4B2A9'
+    };
+    const catLabels = {
+        content_engagement: '内容互动',
+        purchase_intent: '购买意向',
+        product_interaction: '产品互动',
+        other: '其他'
+    };
+
+    function buildGroupDetails(group, accentColor, label) {
+        if (!group || !group.all_comments || group.all_comments.length === 0) return '';
+        const comments = group.all_comments;
+        let rows = '';
+        comments.forEach((c, idx) => {
+            const catKey = c.category_key || 'other';
+            const catColor = catColors[catKey] || '#B4B2A9';
+            const catName = catLabels[catKey] || '其他';
+            const signals = (c.matched_signals || []).join(', ');
+            const signalHtml = signals ? `<span style="color:#94a3b8;margin-left:6px">[${escHtml(signals)}]</span>` : '';
+            rows += `<tr style="border-bottom:1px solid #f1f5f9">
+                <td style="padding:8px 6px;font-size:12px;color:#64748b;vertical-align:top;width:28px">${idx + 1}</td>
+                <td style="padding:8px 6px;font-size:13px;color:#334155;vertical-align:top">${escHtml(c.text)}</td>
+                <td style="padding:8px 6px;vertical-align:top;white-space:nowrap">
+                    <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;color:#fff;background:${catColor}">${catName}</span>
+                </td>
+                <td style="padding:8px 6px;font-size:12px;color:#64748b;vertical-align:top;white-space:nowrap">${c.likes || 0} 👍</td>
+            </tr>`;
+        });
+        return `<div style="margin-bottom:16px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                <span style="width:8px;height:8px;border-radius:2px;background:${accentColor};display:inline-block"></span>
+                <strong style="font-size:14px">${label}</strong>
+                <span style="font-size:12px;color:#64748b">${comments.length} 条</span>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                    <tr style="border-bottom:1px solid #e2e8f0">
+                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;width:28px">#</th>
+                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500">评论原文</th>
+                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">分类</th>
+                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">点赞</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    }
+
+    const vHtml = buildGroupDetails(vertical, '#7F77DD', '垂类达人');
+    const lHtml = buildGroupDetails(lifestyle, '#D4537E', '生活种草达人');
+    if (!vHtml && !lHtml) return '';
+
+    return `<div class="section" style="margin-top:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('.chevron').style.transform=this.nextElementSibling.classList.contains('hidden')?'rotate(0deg)':'rotate(180deg)'">
+            <h2 style="margin:0;display:flex;align-items:center;gap:8px">
+                评论明细
+                <span style="font-size:11px;color:#1D9E75;background:#E6F7F1;padding:2px 8px;border-radius:4px">可折叠</span>
+            </h2>
+            <span class="chevron" style="font-size:18px;color:#94a3b8;transition:transform 0.2s;transform:rotate(0deg)">▼</span>
+        </div>
+        <div class="hidden" style="margin-top:12px">
+            ${vHtml}
+            ${lHtml}
+        </div>
     </div>`;
 }
 

@@ -1699,6 +1699,7 @@ def api_batch_comments():
                 "purchase_intent_score": score,
                 "purchase_intent_label": label,
                 "top_comments": pi_comments[:10],
+                "all_comments": all_classified,
                 "errors": video_errors[:5],
             }
 
