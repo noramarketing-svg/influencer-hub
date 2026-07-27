@@ -1810,7 +1810,10 @@ def _cal_diagnose(text, old_cat, new_cat, config):
     matched_exclude = _cal_hit(t, target.get("exclude_signals", []))
 
     if matched_target:
-        lines.append(f"目标分类「{target.get('name_zh', new_cat)}」有匹配信号「{matched_target}」，但被优先级更高的类抢走")
+        if lines:
+            lines.append(f"目标分类「{target.get('name_zh', new_cat)}」有匹配信号「{matched_target}」，但被优先级更高的类抢走")
+        else:
+            lines.append(f"目标分类「{target.get('name_zh', new_cat)}」有匹配信号「{matched_target}」（当前分类规则认为已匹配，但实际被归入了 {old_cat}）")
     elif matched_exclude:
         lines.append(f"目标分类「{target.get('name_zh', new_cat)}」的排除信号「{matched_exclude}」错误排除了该评论")
     else:
@@ -1833,15 +1836,17 @@ def _cal_apply_fix(text, new_cat, matched_exclude, config):
             target["exclude_signals"] = [s for s in excludes if s != matched_exclude]
             fix_items.append(f"移除排除信号「{matched_exclude}」")
 
-    # Fix 2: 新增关键词
-    keyword = _cal_extract_keyword(text, new_cat, config)
-    if not keyword:
-        keyword = _cal_extract_keyword_force(text)
-
-    existing = [s.lower() for s in target.get("signals", [])]
-    if keyword and keyword.lower() not in existing:
-        target["signals"].append(keyword.lower())
-        fix_items.append(f"新增信号「{keyword}」")
+    # Fix 2: 新增关键词（仅当目标分类没有任何匹配信号时）
+    matched_target = _cal_hit(t, target.get("signals", []))
+    keyword = None
+    if not matched_target:
+        keyword = _cal_extract_keyword(text, new_cat, config)
+        if not keyword:
+            keyword = _cal_extract_keyword_force(text)
+        existing = [s.lower() for s in target.get("signals", [])]
+        if keyword and keyword.lower() not in existing:
+            target["signals"].append(keyword.lower())
+            fix_items.append(f"新增信号「{keyword}」")
 
     return fix_items, keyword
 
