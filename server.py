@@ -1733,6 +1733,248 @@ def api_batch_comments():
         return jsonify({"error": f"批量评论分析失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
+# ============ 评论分类在线校准 ============
+
+COMMENT_CAT_ORDER = ["content_engagement", "purchase_intent", "product_interaction", "other"]
+COMMENT_CAT_NAMES = {
+    "content_engagement": "内容互动",
+    "purchase_intent": "购买意���",
+    "product_interaction": "产品互动",
+    "other": "其他",
+}
+
+
+def _cal_norm(text):
+    return " " + (text or "").lower().strip() + " "
+
+
+def _cal_hit(text_norm, signals):
+    for s in signals:
+        if s.lower() in text_norm:
+            return s
+    return None
+
+
+def _cal_extract_keyword(text, target_cat, config):
+    """从评论中提取最特异的短语用于加入目标分类信号"""
+    words = text.lower().strip().split()
+    if not words:
+        return None
+
+    # 收集所有已有信号（避免重复）
+    all_signals = set()
+    for ck, cc in config.get("categories", {}).items():
+        for s in cc.get("signals", []):
+            all_signals.add(s.lower())
+
+    # 尝试 3-gram → 2-gram，选最长的全新短语
+    for n in [3, 2]:
+        for i in range(len(words) - n + 1):
+            phrase = " ".join(words[i:i+n])
+            if len(phrase) >= 5 and phrase not in all_signals:
+                return phrase
+    return None
+
+
+def _cal_extract_keyword_force(text):
+    """兜底：强制取评论最前面3个词"""
+    words = text.lower().strip().split()
+    if len(words) >= 3:
+        return " ".join(words[:3])
+    return text.lower().strip()
+
+
+def _cal_diagnose(text, old_cat, new_cat, config):
+    """分析错分原因，返回诊断文本列表"""
+    t = _cal_norm(text)
+    cats = config.get("categories", {})
+    order = config.get("classification_order", COMMENT_CAT_ORDER)
+    lines = []
+
+    # 1. 逐类解释为什么到了 old_cat
+    old_idx = order.index(old_cat) if old_cat in order else len(order)
+    for ck in order:
+        cat = cats.get(ck, {})
+        if ck == new_cat or (ck == old_cat and ck != "other"):
+            break
+        matched_sig = _cal_hit(t, cat.get("signals", []))
+        if matched_sig:
+            lines.append(f"命中了「{cat.get('name_zh', ck)}」的信号「{matched_sig}」→ 被优先归为该类")
+        elif ck == "other":
+            if old_cat == "other":
+                lines.append("未命中任何分类信号 → 归入「其他」")
+
+    # 2. 检查目标分类是否有匹配信号（但被 exclude 扼杀）
+    target = cats.get(new_cat, {})
+    matched_target = _cal_hit(t, target.get("signals", []))
+    matched_exclude = _cal_hit(t, target.get("exclude_signals", []))
+
+    if matched_target:
+        lines.append(f"目标分类「{target.get('name_zh', new_cat)}」有匹配信号「{matched_target}」，但被优先级更高的类抢走")
+    elif matched_exclude:
+        lines.append(f"目标分类「{target.get('name_zh', new_cat)}」的排除信号「{matched_exclude}」错误排除了该评论")
+    else:
+        lines.append(f"目标分类「{target.get('name_zh', new_cat)}」无匹配信号，需新增关键词")
+
+    return lines, matched_exclude
+
+
+def _cal_apply_fix(text, new_cat, matched_exclude, config):
+    """应用修复：移除误排除、新增关键词信号"""
+    t = _cal_norm(text)
+    cats = config.get("categories", {})
+    target = cats.get(new_cat, {})
+    fix_items = []
+
+    # Fix 1: 移除误排除的 exclude_signal
+    if matched_exclude:
+        excludes = target.get("exclude_signals", [])
+        if matched_exclude in excludes:
+            target["exclude_signals"] = [s for s in excludes if s != matched_exclude]
+            fix_items.append(f"移除排除信号「{matched_exclude}」")
+
+    # Fix 2: 新增关键词
+    keyword = _cal_extract_keyword(text, new_cat, config)
+    if not keyword:
+        keyword = _cal_extract_keyword_force(text)
+
+    existing = [s.lower() for s in target.get("signals", [])]
+    if keyword and keyword.lower() not in existing:
+        target["signals"].append(keyword.lower())
+        fix_items.append(f"新增信号「{keyword}」")
+
+    return fix_items, keyword
+
+
+@app.route("/api/batch/calibrate_comment", methods=["POST"])
+def api_calibrate_comment():
+    """
+    校准单条评论分类。自动分析错分原因并更新配置文件。
+    Input: {text: str, old_category: str, new_category: str}
+    """
+    try:
+        from engines.comment_analyzer import load_config, classify_single_comment
+        import engines.comment_analyzer as ca_mod
+        import copy, datetime
+
+        data = request.get_json()
+        text = data.get("text", "").strip()
+        old_cat = data.get("old_category", "other")
+        new_cat = data.get("new_category", "purchase_intent")
+
+        if not text:
+            return jsonify({"error": "评论原文不能为空"}), 400
+        if new_cat not in COMMENT_CAT_NAMES:
+            return jsonify({"error": f"无效的目标分类: {new_cat}"}), 400
+
+        config = load_config()
+
+        # 加载前保存备份
+        config_backup = copy.deepcopy(config)
+
+        # Step 1: 诊断
+        diagnosis_lines, matched_exclude = _cal_diagnose(text, old_cat, new_cat, config)
+
+        # Step 2: 应用修复
+        fix_items, keyword = _cal_apply_fix(text, new_cat, matched_exclude, config)
+
+        if not fix_items:
+            return jsonify({
+                "success": False,
+                "diagnosis": "该评论的现有规则已可正确分类，无需修改配置。\n\n诊断：" + "\n".join(diagnosis_lines),
+            })
+
+        # Step 3: 保存配置
+        config["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        config_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "configs", "comment_classification_config.json"
+        )
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+
+        # Step 4: 清除模块缓存
+        ca_mod._config_cache = config
+        ca_mod._compiled_patterns_cache = {}
+
+        # Step 5: 验证
+        cat_key2, _, name_zh2, _ = classify_single_comment(text, config)
+        verified = cat_key2 == new_cat
+
+        return jsonify({
+            "success": verified,
+            "verified": verified,
+            "reclassified_as": name_zh2,
+            "diagnosis": "\n".join(diagnosis_lines),
+            "fix": fix_items,
+            "keyword": keyword,
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"校准失败: {str(e)}", "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/batch/calibrate_batch", methods=["POST"])
+def api_calibrate_batch():
+    """批量校准多条评论"""
+    try:
+        data = request.get_json()
+        corrections = data.get("corrections", [])
+        if not corrections:
+            return jsonify({"error": "校准列表为空"}), 400
+
+        results = []
+        for idx, corr in enumerate(corrections):
+            text = corr.get("text", "").strip()
+            old_cat = corr.get("old_category", "other")
+            new_cat = corr.get("new_category", "purchase_intent")
+
+            if not text:
+                results.append({"index": idx, "success": False, "error": "评论原文为空"})
+                continue
+
+            from engines.comment_analyzer import load_config, classify_single_comment
+            import engines.comment_analyzer as ca_mod
+
+            config = load_config()
+            diagnosis_lines, matched_exclude = _cal_diagnose(text, old_cat, new_cat, config)
+            fix_items, keyword = _cal_apply_fix(text, new_cat, matched_exclude, config)
+
+            if not fix_items:
+                results.append({
+                    "index": idx, "success": False,
+                    "error": "无需修改配置", "text": text[:60],
+                })
+                continue
+
+            config["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            config_file = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "configs", "comment_classification_config.json"
+            )
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            ca_mod._config_cache = config
+            ca_mod._compiled_patterns_cache = {}
+
+            cat_key2, _, name_zh2, _ = classify_single_comment(text, config)
+            results.append({
+                "index": idx, "success": cat_key2 == new_cat,
+                "fix": fix_items, "keyword": keyword,
+                "reclassified_as": name_zh2,
+                "text": text[:60],
+            })
+
+        total = len(results)
+        ok = sum(1 for r in results if r.get("success"))
+        return jsonify({"total": total, "fixed": ok, "results": results})
+
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"批量校准失败: {str(e)}", "trace": traceback.format_exc()}), 500
+
+
 def _llm_generate_comparison_insights(vertical, lifestyle):
     """用 DeepSeek 生成两组评论的对比洞察"""
     if not DEEPSEEK_CLIENT:

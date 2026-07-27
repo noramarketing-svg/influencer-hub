@@ -1634,6 +1634,7 @@ async function batchCommentInsight() {
 
     bcAbortController = new AbortController();
     btn.disabled = true;
+    bcCalQueue = [];  // 清空上次校准队列
     progressBar.classList.remove('hidden');
     resultsArea.classList.add('hidden');
     const totalLinks = verticalLinks.length + lifestyleLinks.length;
@@ -1702,6 +1703,16 @@ function renderBatchCommentResults(data) {
 
     // 评论明细（可折叠）
     html += renderCommentDetails(v, l);
+
+    // 校准提交栏
+    html += `<div id="bc-cal-bar" class="hidden" style="position:sticky;bottom:0;background:#fff;border-top:2px solid #f59e0b;padding:10px 16px;display:flex;align-items:center;gap:12px;z-index:10;margin-top:16px;border-radius:8px;box-shadow:0 -2px 12px rgba(0,0,0,0.08)">
+        <span style="font-size:13px;color:#475569">
+            待校准：<strong id="bc-cal-count" style="color:#f59e0b">0</strong> 条
+        </span>
+        <span style="font-size:11px;color:#94a3b8;flex:1">修改分类后点击提交，自动更新后台规则</span>
+        <button class="btn" style="font-size:12px;padding:4px 12px;margin:0" id="bc-cal-submit-btn" onclick="bcSubmitCalibration()">提交校准</button>
+        <span id="bc-cal-status" style="font-size:12px"></span>
+    </div>`;
 
     container.innerHTML = html;
 }
@@ -1784,6 +1795,103 @@ function renderEmptyCard(label, accentColor) {
     </div>`;
 }
 
+// ============ Panel 4 校准队列 ============
+let bcCalQueue = [];  // [{text, old_category, new_category, rowHtml}]
+
+function bcQueueCorrection(text, oldCat, newCat, rowElem) {
+    if (oldCat === newCat) {
+        // 移除已存在的相同修正
+        bcCalQueue = bcCalQueue.filter(q => q.text !== text);
+        bcUpdateCalBar();
+        return;
+    }
+    // 检查是否已存在
+    const existing = bcCalQueue.find(q => q.text === text);
+    if (existing) {
+        existing.new_category = newCat;
+        existing.old_category = oldCat;
+    } else {
+        bcCalQueue.push({
+            text: text,
+            old_category: oldCat,
+            new_category: newCat,
+            rowElem: rowElem
+        });
+    }
+    bcUpdateCalBar();
+}
+
+function bcUpdateCalBar() {
+    const bar = document.getElementById('bc-cal-bar');
+    if (!bar) return;
+    if (bcCalQueue.length === 0) {
+        bar.classList.add('hidden');
+        return;
+    }
+    bar.classList.remove('hidden');
+    const countEl = document.getElementById('bc-cal-count');
+    if (countEl) countEl.textContent = bcCalQueue.length;
+}
+
+function bcRemoveFromQueue(idx) {
+    bcCalQueue.splice(idx, 1);
+    bcUpdateCalBar();
+}
+
+function bcClearQueue() {
+    bcCalQueue = [];
+    bcUpdateCalBar();
+}
+
+async function bcSubmitCalibration() {
+    if (bcCalQueue.length === 0) return;
+    const btn = document.getElementById('bc-cal-submit-btn');
+    const status = document.getElementById('bc-cal-status');
+    btn.disabled = true;
+    btn.textContent = '提交中...';
+    status.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px"></span> 正在更新规则...';
+
+    try {
+        const resp = await fetch('/api/batch/calibrate_batch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({corrections: bcCalQueue.map(q => ({
+                text: q.text,
+                old_category: q.old_category,
+                new_category: q.new_category
+            }))})
+        });
+        const data = await resp.json();
+        if (data.error) {
+            status.innerHTML = `<span class="error">${escHtml(data.error)}</span>`;
+            return;
+        }
+
+        const ok = data.fixed || 0;
+        const fail = data.total - ok;
+        let msg = `已修复 ${ok} 条`;
+        if (fail > 0) msg += `，${fail} 条无需修改`;
+        status.innerHTML = `<span class="ok">${msg}</span>`;
+
+        // Show details for failures
+        if (data.results) {
+            const failed = data.results.filter(r => !r.success);
+            if (failed.length > 0) {
+                status.innerHTML += `<br><span style="font-size:11px;color:#94a3b8">${failed.map(r => `"${escHtml(r.text)}"`).join('<br>')}</span>`;
+            }
+        }
+
+        // Clear queue
+        bcCalQueue = [];
+        bcUpdateCalBar();
+    } catch(e) {
+        status.innerHTML = `<span class="error">提交失败: ${escHtml(e.message)}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '提交校准';
+    }
+}
+
 function renderCommentDetails(vertical, lifestyle) {
     const catColors = {
         content_engagement: '#7F77DD',
@@ -1802,19 +1910,32 @@ function renderCommentDetails(vertical, lifestyle) {
         if (!group || !group.all_comments || group.all_comments.length === 0) return '';
         const comments = group.all_comments;
         let rows = '';
+        const selectOptions = Object.entries(catLabels).map(([k, v]) =>
+            `<option value="${k}">${v}</option>`
+        ).join('');
+
         comments.forEach((c, idx) => {
             const catKey = c.category_key || 'other';
             const catColor = catColors[catKey] || '#B4B2A9';
             const catName = catLabels[catKey] || '其他';
-            const signals = (c.matched_signals || []).join(', ');
-            const signalHtml = signals ? `<span style="color:#94a3b8;margin-left:6px">[${escHtml(signals)}]</span>` : '';
-            rows += `<tr style="border-bottom:1px solid #f1f5f9">
-                <td style="padding:8px 6px;font-size:12px;color:#64748b;vertical-align:top;width:28px">${idx + 1}</td>
-                <td style="padding:8px 6px;font-size:13px;color:#334155;vertical-align:top">${escHtml(c.text)}</td>
-                <td style="padding:8px 6px;vertical-align:top;white-space:nowrap">
+            const rowId = `bc-row-${label === '垂类达人' ? 'v' : 'l'}-${idx}`;
+            rows += `<tr style="border-bottom:1px solid #f1f5f9" id="${rowId}">
+                <td style="padding:8px 4px;font-size:12px;color:#64748b;vertical-align:top;width:26px">${idx + 1}</td>
+                <td style="padding:8px 4px;font-size:13px;color:#334155;vertical-align:top">${escHtml(c.text)}</td>
+                <td style="padding:8px 4px;vertical-align:top;white-space:nowrap">
                     <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;color:#fff;background:${catColor}">${catName}</span>
                 </td>
-                <td style="padding:8px 6px;font-size:12px;color:#64748b;vertical-align:top;white-space:nowrap">${c.likes || 0} 👍</td>
+                <td style="padding:8px 4px;font-size:12px;color:#64748b;vertical-align:top;white-space:nowrap">${c.likes || 0} 👍</td>
+                <td style="padding:4px;vertical-align:top;white-space:nowrap">
+                    <select class="cal-select" data-original="${catKey}" data-text="${escHtml(c.text).replace(/"/g, '&quot;')}" data-row="${rowId}"
+                        onchange="bcQueueCorrection(this.dataset.text, this.dataset.original, this.value, document.getElementById(this.dataset.row));
+                            this.style.background=this.value===this.dataset.original?'transparent':'#fef3c7';
+                            this.style.borderColor=this.value===this.dataset.original?'#e2e8f0':'#f59e0b';"
+                        style="font-size:11px;padding:2px 4px;border:1px solid #e2e8f0;border-radius:4px;background:transparent;color:#64748b;cursor:pointer;max-width:80px">
+                        <option value="${catKey}" selected>${catName}</option>
+                        ${Object.entries(catLabels).filter(([k]) => k !== catKey).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+                    </select>
+                </td>
             </tr>`;
         });
         return `<div style="margin-bottom:16px">
@@ -1822,14 +1943,16 @@ function renderCommentDetails(vertical, lifestyle) {
                 <span style="width:8px;height:8px;border-radius:2px;background:${accentColor};display:inline-block"></span>
                 <strong style="font-size:14px">${label}</strong>
                 <span style="font-size:12px;color:#64748b">${comments.length} 条</span>
+                <span style="font-size:10px;color:#f59e0b;margin-left:4px">修改分类请点最右列</span>
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:13px">
                 <thead>
                     <tr style="border-bottom:1px solid #e2e8f0">
-                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;width:28px">#</th>
-                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500">评论原文</th>
-                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">分类</th>
-                        <th style="padding:6px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">点赞</th>
+                        <th style="padding:6px 4px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;width:26px">#</th>
+                        <th style="padding:6px 4px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500">评论原文</th>
+                        <th style="padding:6px 4px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">分类</th>
+                        <th style="padding:6px 4px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">点赞</th>
+                        <th style="padding:6px 4px;text-align:left;font-size:11px;color:#94a3b8;font-weight:500;white-space:nowrap">修正</th>
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
@@ -1844,12 +1967,12 @@ function renderCommentDetails(vertical, lifestyle) {
     return `<div class="section" style="margin-top:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="this.nextElementSibling.classList.toggle('hidden');this.querySelector('.chevron').style.transform=this.nextElementSibling.classList.contains('hidden')?'rotate(0deg)':'rotate(180deg)'">
             <h2 style="margin:0;display:flex;align-items:center;gap:8px">
-                评论明细
+                评论明细 &amp; 在线校准
                 <span style="font-size:11px;color:#1D9E75;background:#E6F7F1;padding:2px 8px;border-radius:4px">可折叠</span>
             </h2>
             <span class="chevron" style="font-size:18px;color:#94a3b8;transition:transform 0.2s;transform:rotate(0deg)">▼</span>
         </div>
-        <div class="hidden" style="margin-top:12px">
+        <div class="hidden" id="bc-details-inner" style="margin-top:12px">
             ${vHtml}
             ${lHtml}
         </div>
