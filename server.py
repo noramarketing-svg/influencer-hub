@@ -62,22 +62,16 @@ CAT_COLORS = {
 }
 
 COMMENT_CAT_NAMES = {
-    "purchase_inquiry": "产品咨询",
+    "content_engagement": "内容互动",
     "purchase_intent": "购买意向",
-    "product_discussion": "产品讨论",
-    "positive_feedback": "正向反馈",
-    "negative_feedback": "负向反馈",
-    "social_engagement": "社交互动",
+    "product_interaction": "产品互动",
     "other": "其他",
 }
 
 COMMENT_CAT_CSS = {
-    "purchase_inquiry": "c-inquiry",
+    "content_engagement": "c-engagement",
     "purchase_intent": "c-intent",
-    "product_discussion": "c-discuss",
-    "positive_feedback": "c-positive",
-    "negative_feedback": "c-negative",
-    "social_engagement": "c-social",
+    "product_interaction": "c-discuss",
     "other": "",
 }
 
@@ -187,8 +181,8 @@ def health():
     """Health check + version info"""
     return jsonify({
         "status": "ok",
-        "version": "3.1",
-        "features": ["batch_analyze", "batch_fetch", "comment_stop", "batch_stop"]
+        "version": "4.0",
+        "features": ["batch_analyze", "batch_fetch", "comment_stop", "batch_stop", "llm_fallback", "panel4_batch_comments"]
     })
 
 
@@ -250,9 +244,14 @@ def api_analyze():
         if not need_refresh:
             # 缓存最新，直接用
             results = []
-            for v in cached:
+            unclassified_titles = []
+            unclassified_indices = []
+            for i, v in enumerate(cached):
                 title = v.get("标题", v.get("title", ""))
                 brand, keywords, category, basis = classify_fn(title)
+                if category == "其他" and basis == "No rule matched":
+                    unclassified_titles.append(title)
+                    unclassified_indices.append(i)
                 results.append({
                     "发布日期": v.get("发布日期", v.get("date", "")),
                     "达人ID": username,
@@ -265,6 +264,14 @@ def api_analyze():
                     "命中关键词": keywords or "",
                     "分类依据": basis,
                 })
+            # LLM 兜底
+            if language != "es" and unclassified_titles:
+                en_config = load_en_config()
+                llm_results = _llm_classify_titles(unclassified_titles, en_config)
+                for idx, cat in llm_results.items():
+                    if idx < len(results):
+                        results[idx]["分类"] = cat
+                        results[idx]["分类依据"] = "LLM fallback"
             return jsonify({
                 "username": username, "platform": platform, "language": language,
                 "videos": results, "source": "cache", "status": status_msg
@@ -435,12 +442,29 @@ def api_comments_analysis():
 
         video_results = []
         all_classified = []
+        # Track unclassified for LLM fallback
+        unclassified_texts = []
+        unclassified_global_indices = []
+        
         for v in video_group:
             res = analyzed_map.get(v.get("视频链接", ""))
             if res is None:
                 continue
-            all_classified.extend(res.get("_classified", []))
+            for c in res.get("_classified", []):
+                all_classified.append(c)
+                if c["category_key"] == "other":
+                    unclassified_texts.append(c.get("text", "")[:200])
+                    unclassified_global_indices.append(len(all_classified) - 1)
             video_results.append({k: val for k, val in res.items() if k != "_classified"})
+
+        # LLM 兜底 — 对 "other" 评论做语义重分类
+        if comment_config.get("llm_fallback", {}).get("enabled") and unclassified_texts:
+            llm_results = _llm_classify_comments(unclassified_texts, comment_config)
+            for local_idx, cat_key in llm_results.items():
+                if local_idx < len(unclassified_global_indices):
+                    g_idx = unclassified_global_indices[local_idx]
+                    all_classified[g_idx]["category_key"] = cat_key
+                    all_classified[g_idx]["category"] = COMMENT_CAT_NAMES.get(cat_key, "其他")
 
         # Aggregate distribution across all videos in group
         agg_dist = defaultdict(lambda: {"count": 0, "name_zh": "", "pct": 0})
@@ -808,835 +832,135 @@ def _analyze_video_with_deepseek(transcript, comments_sample, language="en"):
         # 尝试解析 JSON
         try:
             # 清理可能的 markdown 代码块
-            if "```" in content:
-                content = content.split("```")[1].replace("json", "").strip()
+            content = content.strip()
+            if content.startswith("```"):
+                content = re.sub(r'^```(?:json)?\s*', '', content)
+                content = re.sub(r'\s*```$', '', content)
             return json.loads(content)
-        except Exception:
-            return {"raw_analysis": content}
+        except json.JSONDecodeError:
+            return {"raw_response": content, "hook": content[:200]}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"DeepSeek API 调用失败: {str(e)}"}
 
 
-def _run_single_video_analysis(task_id, url, platform, language):
-    """后台线程：单条视频深入分析"""
-    try:
-        _async_tasks[task_id] = {"status": "running", "progress": "识别平台并抓取基础数据..."}
-        metadata = _fetch_video_metadata_sc(url, platform)
+# ============================================================
+# LLM Fallback: 分类兜底（选题 + 评论）
+# ============================================================
 
-        _async_tasks[task_id]["progress"] = "抓取口播原文..."
-        transcript = _fetch_transcript_sc(url, platform)
-
-        _async_tasks[task_id]["progress"] = "抓取全部评论..."
-        comments = _fetch_comments_single_video_sc(url, platform, target_valid=50)
-
-        _async_tasks[task_id]["progress"] = "AI 拆解 HOOK / 中段 / CTA..."
-        analysis = _analyze_video_with_deepseek(transcript, comments, language)
-
-        _async_tasks[task_id] = {
-            "status": "done",
-            "result": {
-                "metadata": metadata,
-                "transcript": transcript,
-                "comments": comments,
-                "analysis": analysis,
-            }
-        }
-    except Exception as e:
-        import traceback
-        _async_tasks[task_id] = {"status": "error", "error": str(e), "trace": traceback.format_exc()}
-
-
-def _run_batch_views(task_id, urls, excel_path=None):
-    """后台线程：批量抓取视频最新 View，可选回填到 Excel"""
-    results = []
-    for i, url in enumerate(urls):
-        _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{len(urls)}..."}
-        original_url = url  # 保留原始 URL
-        normalized = _normalize_url(url)
-        platform = _detect_platform(normalized)
-        try:
-            meta = _fetch_video_metadata_sc(normalized, platform)
-            results.append({
-                "url": original_url,
-                "normalized_url": normalized,
-                "platform": platform,
-                "author": meta.get("author"),
-                "title": meta.get("title", "")[:120],
-                "views": meta.get("views"),
-                "likes": meta.get("likes"),
-                "comments": meta.get("comments"),
-            })
-        except Exception as e:
-            results.append({"url": original_url, "normalized_url": normalized, "platform": platform, "error": str(e)})
-
-    result_data = {"videos": results, "total": len(results)}
-
-    # 如果有 Excel，回填 View 并生成下载文件
-    download_url = None
-    if excel_path and os.path.exists(excel_path):
-        try:
-            download_url = _fill_views_to_excel(excel_path, results)
-        except Exception as e:
-            result_data["excel_error"] = str(e)
-
-    result_data["download_url"] = download_url
-    _async_tasks[task_id] = {"status": "done", "result": result_data}
-
-
-def _run_batch_views_paste(task_id, tk_urls, ig_urls):
-    """后台线程：双列 URL 批量抓取，按行合并 TK 和 IG 结果"""
-    max_rows = max(len(tk_urls), len(ig_urls))
-    rows = []
-
-    for i in range(max_rows):
-        _async_tasks[task_id] = {"status": "running", "progress": f"正在抓取 {i+1}/{max_rows}..."}
-        row = {"tk_view": None, "ig_view": None, "tk_url": None, "ig_url": None, "tk_error": None, "ig_error": None}
-
-        # 抓取 TK（如果此行有 TK URL）
-        if i < len(tk_urls) and tk_urls[i].strip():
-            tk_url = tk_urls[i].strip()
-            row["tk_url"] = tk_url
-            try:
-                normalized = _normalize_url(tk_url)
-                meta = _fetch_video_metadata_sc(normalized, "TikTok")
-                row["tk_view"] = meta.get("views")
-            except Exception as e:
-                row["tk_error"] = str(e)
-
-        # 抓取 IG（如果此行有 IG URL）
-        if i < len(ig_urls) and ig_urls[i].strip():
-            ig_url = ig_urls[i].strip()
-            row["ig_url"] = ig_url
-            try:
-                normalized = _normalize_url(ig_url)
-                meta = _fetch_video_metadata_sc(normalized, "Instagram")
-                row["ig_view"] = meta.get("views")
-            except Exception as e:
-                row["ig_error"] = str(e)
-
-        rows.append(row)
-
-    _async_tasks[task_id] = {"status": "done", "result": {"rows": rows, "total": len(rows)}}
-
-
-def _extract_video_id(url):
-    """从 URL 中提取视频唯一标识（shortcode / video ID），用于可靠匹配"""
-    if not url:
-        return ""
-    url = str(url).strip()
-    # Instagram: /reel/SHORTCODE/ 或 /reels/SHORTCODE/ 或 /p/SHORTCODE/
-    ig_match = re.search(r'instagram\.com/(?:reel|reels|p)/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
-    if ig_match:
-        return f"IG_{ig_match.group(1)}"
-    # TikTok: /video/1234567890123456789
-    tk_match = re.search(r'tiktok\.com/[^/]+/video/(\d+)', url, re.IGNORECASE)
-    if tk_match:
-        return f"TK_{tk_match.group(1)}"
-    return ""
-
-
-def _fill_views_to_excel(tmp_path, results):
-    """回填 View 到原 Excel，保留原格式，TK 和 IG 分列。
+def _llm_classify_titles(titles, config):
+    """LLM 兜底：对未命中的视频标题做语义分类（批量，最多 20 条）"""
+    if not DEEPSEEK_CLIENT:
+        return {}
     
-    使用行序号直接对应：results[i] → Excel row i+2。
-    不依赖 URL 匹配，彻底避免任何匹配失败的可能。
-    """
-    from openpyxl import load_workbook
+    llm_cfg = config.get("llm_config", {})
+    if not llm_cfg.get("enabled", False):
+        return {}
+    
+    prompt_template = llm_cfg.get("prompt_template", "")
+    if not prompt_template:
+        prompt_template = """你是一个短视频标题分类器。请将以下每个标题分入最合适的类别。
+类别选项:
+1. 3C配件品牌赞助/种草 (3C Accessories Brand Sponsor/Review) - 对3C配件(充电器/耳机/手机壳等)的深度评测、对比或推荐
+2. Apple/iOS生态 (Apple/iOS Ecosystem) - 苹果产品、iOS、Mac生态相关内容
+3. 其他品牌产品种草 (Other Brand Product Review) - 对其他品牌产品的评测或推荐
+4. 科技资讯/教程技巧 (Tech News & Tutorials) - 科技新闻、教程、产品发布、技术科普
+5. AI工具/生活观点 (AI Tools & Tech Lifestyle) - AI工具使用、科技生活方式
+6. 赞助广告内容 (Sponsored Content)
+7. 其他 (Other) - 无法归类的非技术内容
 
-    wb = load_workbook(tmp_path)
-    ws = wb.active
+对每条标题，输出JSON格式：{"index": 序号, "category": "类别名", "reason": "简短理由"}
 
-    # 找 URL 列（仅用于表头定位，不用于匹配）
-    headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
-    url_col = None
-    for i, h in enumerate(headers):
-        if h in ['url', '链接', '视频链接', 'video_url', 'link']:
-            url_col = i
-            break
-
-    if url_col is None:
-        for col_idx in range(1, ws.max_column + 1):
-            for row_idx in range(1, min(ws.max_row + 1, 6)):
-                val = str(ws.cell(row=row_idx, column=col_idx).value or '')
-                if 'tiktok.com' in val.lower() or 'instagram.com' in val.lower():
-                    url_col = col_idx - 1
-                    break
-            if url_col is not None:
-                break
-
-    if url_col is None:
-        raise Exception("无法在 Excel 中定位 URL 列，无法回填")
-
-    # 确定 TK View 和 IG View 列位置（优先复用已有列，否则在末尾追加）
-    tk_view_col = None
-    ig_view_col = None
-    for i, h in enumerate(headers):
-        if h in ['tt view', 'tk view', 'tiktok view', 'tk播放量', 'tt播放量']:
-            tk_view_col = i
-        if h in ['ig view', 'ig播放量', 'ig 播放量', 'instagram view']:
-            ig_view_col = i
-
-    max_col = ws.max_column
-    if tk_view_col is None:
-        tk_view_col = max_col
-        max_col += 1
-        ws.cell(row=1, column=tk_view_col + 1).value = 'TK View'
-    if ig_view_col is None:
-        ig_view_col = max_col
-        max_col += 1
-        ws.cell(row=1, column=ig_view_col + 1).value = 'IG View'
-
-    # 按行序号回填：results[0] → row 2, results[1] → row 3, ...
-    # 因为 urls 列表就是从 Excel 第2行开始按顺序提取的
-    filled_tk = 0
-    filled_ig = 0
-    for i, r in enumerate(results):
-        row_idx = i + 2  # Excel 行号（1-indexed，第1行是表头）
-        if row_idx > ws.max_row:
-            break
-
-        platform = (r.get("platform") or "").lower()
-        views = r.get("views")
-        error = r.get("error")
-
-        if "instagram" in platform:
-            if views is not None:
-                ws.cell(row=row_idx, column=ig_view_col + 1).value = views
-                filled_ig += 1
-            elif error:
-                ws.cell(row=row_idx, column=ig_view_col + 1).value = f"失败: {str(error)[:50]}"
-        elif "tiktok" in platform:
-            if views is not None:
-                ws.cell(row=row_idx, column=tk_view_col + 1).value = views
-                filled_tk += 1
-            elif error:
-                ws.cell(row=row_idx, column=tk_view_col + 1).value = f"失败: {str(error)[:50]}"
-
-    print(f"[fill_views] Done: TK={filled_tk}, IG={filled_ig} (total results={len(results)})")
-
-    # 保存到 downloads 目录
-    download_dir = os.path.join(BASE_DIR, "downloads")
-    os.makedirs(download_dir, exist_ok=True)
-    output_name = f"view_update_{uuid.uuid4().hex[:8]}.xlsx"
-    output_path = os.path.join(download_dir, output_name)
-    wb.save(output_path)
-
-    return f"/downloads/{output_name}"
-
-
-# ============================================================
-# API: 单条视频深入分析（板块 2）
-# ============================================================
-@app.route("/api/video/analyze", methods=["POST"])
-def api_video_analyze():
-    """单条视频深入分析：启动异步任务"""
+标题列表：
+"""
+    titles_text = "\n".join([f"{i}. {t}" for i, t in enumerate(titles)])
+    full_prompt = prompt_template + titles_text + "\n\n只输出JSON数组，不要其他内容。"
+    
     try:
-        data = request.get_json()
-        url = data.get("url", "").strip()
-        platform = data.get("platform", "").strip()
-        language = data.get("language", "en")
-
-        if not url:
-            return jsonify({"error": "请提供视频链接"}), 400
-
-        if not platform:
-            platform = _detect_platform(url)
-
-        if platform not in ["TikTok", "Instagram"]:
-            return jsonify({"error": "仅支持 TikTok 或 Instagram 视频链接"}), 400
-
-        url = _normalize_url(url)
-        task_id = str(uuid.uuid4())[:8]
-        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_single_video_analysis, args=(task_id, url, platform, language))
-        t.daemon = True
-        t.start()
-        return jsonify({"task_id": task_id, "status": "started"})
+        r = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是短视频标题分类专家，只输出结构化的JSON数组。"},
+                {"role": "user", "content": full_prompt}
+            ],
+            max_tokens=2000,
+            temperature=0.3,
+        )
+        content = r.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = re.sub(r'^```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```$', '', content)
+        results = json.loads(content)
+        if isinstance(results, list):
+            return {item.get("index", 0): item.get("category", "其他") for item in results}
+        return {}
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        print(f"[LLM fallback] Title classification failed: {e}")
+        return {}
 
 
-@app.route("/api/video/status/<task_id>", methods=["GET"])
-def api_video_status(task_id):
-    """轮询单条视频分析状态"""
-    task = _async_tasks.get(task_id)
-    if not task:
-        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
-    return jsonify(task)
+def _llm_classify_comments(comments, config):
+    """LLM 兜底：对未命中的评论做语义分类（批量，最多 30 条）"""
+    if not DEEPSEEK_CLIENT:
+        return {}
+    
+    llm_cfg = config.get("llm_fallback", {})
+    if not llm_cfg.get("enabled", False):
+        return {}
+    
+    prompt_template = llm_cfg.get("prompt_template", "")
+    if not prompt_template:
+        prompt_template = """你是一个TikTok/Instagram评论分类器。请将以下每条评论分入最合适的类别。
+类别选项:
+1. content_engagement (内容互动) - 对视频内容的反应、表情、笑话、对创作者的赞美
+2. purchase_intent (购买意向) - 对产品的购买意愿：询价、问购买渠道、要折扣码、表达想要的意愿
+3. product_interaction (产品互动) - 讨论产品本身：问功能、对比品牌、分享使用体验、给建议
+4. other (其他) - 无法归类的评论：@好友、纯表情、与产品/内容无关的闲聊
 
+对每条评论，输出JSON格式：{"index": 序号, "category": "类别key", "reason": "简短理由"}
 
-# ============================================================
-# API: 批量视频 View 更新（板块 3）
-# ============================================================
-@app.route("/api/videos/views", methods=["POST"])
-def api_videos_views():
-    """批量抓取视频最新 View：启动异步任务"""
+评论列表：
+"""
+    comments_text = "\n".join([f"{i}. {c}" for i, c in enumerate(comments)])
+    full_prompt = prompt_template + comments_text + "\n\n只输出JSON数组，���要其他内容。"
+    
     try:
-        data = request.get_json()
-        urls = data.get("urls", [])
-        if not urls:
-            return jsonify({"error": "请提供视频链接列表"}), 400
-        if len(urls) > 200:
-            return jsonify({"error": "单次最多 200 条链接"}), 400
-
-        task_id = str(uuid.uuid4())[:8]
-        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_batch_views, args=(task_id, urls, None))
-        t.daemon = True
-        t.start()
-        return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
+        r = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是短视频评论分类专家，只输出结构化的JSON数组。"},
+                {"role": "user", "content": full_prompt}
+            ],
+            max_tokens=2000,
+            temperature=0.1,
+        )
+        content = r.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = re.sub(r'^```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```$', '', content)
+        results = json.loads(content)
+        if isinstance(results, list):
+            return {item.get("index", 0): item.get("category", "other") for item in results}
+        return {}
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
-
-
-@app.route("/api/videos/views/status/<task_id>", methods=["GET"])
-def api_videos_views_status(task_id):
-    """轮询批量 View 抓取状态"""
-    task = _async_tasks.get(task_id)
-    if not task:
-        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
-    return jsonify(task)
-
-
-@app.route("/api/videos/views/upload", methods=["POST"])
-def api_videos_views_upload():
-    """上传 Excel 并批量抓取 View（异步）"""
-    try:
-        if 'file' not in request.files:
-            return jsonify({"error": "请上传 Excel 文件"}), 400
-        file = request.files['file']
-        if not file.filename:
-            return jsonify({"error": "文件名为空"}), 400
-
-        # 保存临时文件
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in ['.xlsx', '.xls']:
-            return jsonify({"error": "仅支持 .xlsx / .xls 文件"}), 400
-
-        tmp_path = os.path.join('/tmp', f"views_upload_{uuid.uuid4().hex}{ext}")
-        file.save(tmp_path)
-
-        # 解析 Excel
-        from openpyxl import load_workbook
-        wb = load_workbook(tmp_path, data_only=True)
-        ws = wb.active
-
-        urls = []
-        # 策略 1：找表头名为 url/链接/link 的列
-        headers = [str(cell.value or '').strip().lower() for cell in ws[1]]
-        url_col = None
-        for i, h in enumerate(headers):
-            if h in ['url', '链接', '视频链接', 'video_url', 'link']:
-                url_col = i
-                break
-
-        if url_col is not None:
-            # 有表头，从第二行开始读
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                val = row[url_col] if url_col < len(row) else None
-                if val and str(val).strip():
-                    urls.append(str(val).strip())
-        else:
-            # 策略 2：无表头，扫描所有单元格，提取 TikTok/Instagram 链接
-            for row in ws.iter_rows(values_only=True):
-                for val in row:
-                    if not val:
-                        continue
-                    s = str(val).strip()
-                    if ('tiktok.com' in s.lower() or 'instagram.com' in s.lower()) and s.startswith('http'):
-                        urls.append(s)
-
-        if not urls:
-            return jsonify({"error": "未从 Excel 中解析到任何链接，请确保包含 TikTok 或 Instagram 视频链接"}), 400
-        if len(urls) > 200:
-            os.remove(tmp_path)
-            return jsonify({"error": f"链接数量 {len(urls)} 超过 200 条限制"}), 400
-
-        task_id = str(uuid.uuid4())[:8]
-        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_batch_views, args=(task_id, urls, tmp_path))
-        t.daemon = True
-        t.start()
-        return jsonify({"task_id": task_id, "status": "started", "total": len(urls)})
-    except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
-
-
-@app.route("/api/videos/views/paste", methods=["POST"])
-def api_videos_views_paste():
-    """双列粘贴 URL 批量抓取 View（异步）"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "请提供数据"}), 400
-
-        # 解析 TK 和 IG URL 列表
-        tk_input = data.get("tk_urls", [])
-        ig_input = data.get("ig_urls", [])
-
-        # 支持粘贴文本（按行分割，保留空行以对齐 Excel 行号）
-        if isinstance(tk_input, str):
-            tk_input = tk_input.rstrip("\n").split("\n")
-        if isinstance(ig_input, str):
-            ig_input = ig_input.rstrip("\n").split("\n")
-
-        # 去掉每行前后空白，但保留空字符串（表示该行无 URL）
-        tk_urls = [u.strip() if u else "" for u in tk_input]
-        ig_urls = [u.strip() if u else "" for u in ig_input]
-
-        # 取最大行数，短的列在末尾补空行（保留用户输入的空行位置不变）
-        total = max(len(tk_urls), len(ig_urls))
-        while len(tk_urls) < total:
-            tk_urls.append("")
-        while len(ig_urls) < total:
-            ig_urls.append("")
-        if total == 0:
-            return jsonify({"error": "请至少输入一个链接"}), 400
-        if total > 200:
-            return jsonify({"error": f"链接数量 {total} 超过 200 条限制"}), 400
-
-        task_id = str(uuid.uuid4())[:8]
-        _async_tasks[task_id] = {"status": "started", "progress": "启动中..."}
-        t = threading.Thread(target=_run_batch_views_paste, args=(task_id, tk_urls, ig_urls))
-        t.daemon = True
-        t.start()
-        return jsonify({"task_id": task_id, "status": "started", "total": total})
-    except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        print(f"[LLM fallback] Comment classification failed: {e}")
+        return {}
 
 
 # ============================================================
-# API: Apify fetch — 异步模式（绕过 Render 30s 限制）
+# API: Batch analyze — 批量检查缓存状态
 # ============================================================
-def _run_apify_async(task_id, username, platform, days, api_key, language):
-    """后台线程：执行 Apify 抓取 + 分类 + 缓存"""
-    try:
-        _async_tasks[task_id]["status"] = "running"
-        if "instagram" in platform.lower():
-            videos = fetch_instagram_videos(username, api_key, days)
-        else:
-            videos = fetch_tiktok_videos(username, api_key, days)
 
-        # 增量合并
-        old_cached = load_cached_videos(username, platform)
-        merged = merge_videos(old_cached, videos)
-        save_cached_videos(username, platform, merged)
-
-        # 分类
-        if language == "es":
-            es_config = load_es_config()
-            classify_fn = lambda t: classify_title_es(t, es_config)
-        else:
-            en_config = load_en_config()
-            classify_fn = lambda t: classify_title_en(t, en_config)
-
-        results = []
-        for v in merged:
-            title = v.get("标题", v.get("title", ""))
-            brand, keywords, category, basis = classify_fn(title)
-            results.append({
-                "发布日期": v.get("发布日期", v.get("date", "")),
-                "达人ID": username,
-                "平台": platform,
-                "标题": title,
-                "视频链接": v.get("视频链接", v.get("url", "")),
-                "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
-                "分类": category,
-                "命中品牌": brand or "",
-                "命中关键词": keywords or "",
-                "分类依据": basis,
-            })
-
-        new_count = len(videos)
-        total_count = len(merged)
-        _async_tasks[task_id] = {
-            "status": "done",
-            "result": {
-                "username": username, "platform": platform,
-                "videos": results, "source": "apify",
-                "message": f"Apify 抓取完成: 新增 {new_count} 条，总计 {total_count} 条（已去重合并）"
-            }
-        }
-    except Exception as e:
-        import traceback
-        _async_tasks[task_id] = {
-            "status": "error",
-            "error": f"Apify 抓取失败: {str(e)}",
-            "trace": traceback.format_exc()
-        }
-
-
-@app.route("/api/apify/fetch", methods=["POST"])
-def api_apify_fetch():
-    """触发 Apify 异步抓取（立即返回 task_id，前端轮询状态）"""
-    data = request.get_json()
-    username = data.get("username", "")
-    platform = data.get("platform", "Instagram")
-    days = int(data.get("days", 30))
-    api_key = data.get("api_key") or APIFY_API_KEY
-    language = data.get("language", "en")
-
-    if not api_key:
-        return jsonify({"error": "请提供 Apify API Key"}), 400
-
-    task_id = str(uuid.uuid4())[:8]
-    _async_tasks[task_id] = {"status": "started"}
-
-    t = threading.Thread(target=_run_apify_async, args=(task_id, username, platform, days, api_key, language))
-    t.daemon = True
-    t.start()
-
-    return jsonify({"task_id": task_id, "status": "started"})
-
-
-@app.route("/api/apify/status/<task_id>", methods=["GET"])
-def api_apify_status(task_id):
-    """轮询异步任务状态"""
-    task = _async_tasks.get(task_id)
-    if not task:
-        return jsonify({"status": "not_found", "error": "任务不存在或已过期"}), 404
-    resp = {"status": task["status"]}
-    if task["status"] == "done":
-        resp["result"] = task["result"]
-    elif task["status"] == "error":
-        resp["error"] = task.get("error", "未知错误")
-    return jsonify(resp)
-
-
-# ============================================================
-# API: API Key 管理
-# ============================================================
-def _mask_key(key):
-    if not key or len(key) < 8:
-        return "未设置"
-    return "****" + key[-4:]
-
-
-@app.route("/api/config/keys", methods=["GET"])
-def api_config_keys():
-    """获取当前 API Key 状态 + 剩余额度"""
-    reload_api_keys()
-    return jsonify({
-        "apify": {"set": bool(APIFY_API_KEY), "masked": _mask_key(APIFY_API_KEY)},
-        "scrapecreators": {
-            "set": bool(SC_API_KEY), 
-            "masked": _mask_key(SC_API_KEY),
-            "count": len(SC_API_KEYS),
-            "keys": [_mask_key(k) for k in SC_API_KEYS],
-        },
-        "deepseek": {"set": bool(DEEPSEEK_API_KEY), "masked": _mask_key(DEEPSEEK_API_KEY)},
-    })
-
-
-@app.route("/api/config/credits", methods=["GET"])
-def api_config_credits():
-    """查询各 API 剩余额度"""
-    result = {}
-    # ScrapeCreators
-    sc = _check_sc_credits()
-    if sc:
-        result["scrapecreators"] = sc
+def _wrap_classify(title, lang, en_config, es_config):
+    """分类器包装：支持 LLM 兜底"""
+    if lang == "es":
+        return classify_title_es(title, es_config)
     else:
-        result["scrapecreators"] = {"error": "无法查询"}
-    # Apify
-    ap = _check_apify_credits()
-    if ap:
-        result["apify"] = ap
-    else:
-        result["apify"] = {"error": "无法查询"}
-    return jsonify(result)
+        return classify_title_en(title, en_config)
 
 
-@app.route("/api/config/apify-key", methods=["POST"])
-def api_config_apify_key():
-    """更新 Apify API Key"""
-    data = request.get_json()
-    key = data.get("key", "").strip()
-    if not key:
-        return jsonify({"error": "Key 不能为空"}), 400
-    _update_config_key("APIFY_API_KEY", key)
-    reload_api_keys()
-    return jsonify({"ok": True, "masked": _mask_key(key)})
-
-
-@app.route("/api/config/scrapecreators-key", methods=["POST"])
-def api_config_scrapecreators_key():
-    """更新 ScrapeCreators API Key"""
-    data = request.get_json()
-    key = data.get("key", "").strip()
-    if not key:
-        return jsonify({"error": "Key 不能为空"}), 400
-    _update_config_key("SCRAPECREATORS_API_KEY", key)
-    reload_api_keys()
-    return jsonify({"ok": True, "masked": _mask_key(key)})
-
-
-@app.route("/api/config/deepseek-key", methods=["POST"])
-def api_config_deepseek_key():
-    """更新 DeepSeek API Key"""
-    data = request.get_json()
-    key = data.get("key", "").strip()
-    if not key:
-        return jsonify({"error": "Key 不能为空"}), 400
-    _update_config_key("DEEPSEEK_API_KEY", key)
-    reload_api_keys()
-    return jsonify({"ok": True, "masked": _mask_key(key)})
-
-
-def _update_config_key(var_name, new_value):
-    """更新 configs/api_keys.py 中的变量值，并尝试 git commit + push 到 GitHub"""
-    config_path = os.path.join(BASE_DIR, "configs", "api_keys.py")
-    with open(config_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    # 替换形如 VAR_NAME = "..." 的行
-    import re
-    pattern = re.compile(rf'^{var_name}\s*=\s*"[^"]*"', re.MULTILINE)
-    replacement = f'{var_name} = "{new_value}"'
-    if pattern.search(content):
-        content = pattern.sub(replacement, content)
-    else:
-        content += f"\n{replacement}\n"
-
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write(content)
-
-    # 尝试 git commit + push（如果在 Render 环境有 git 权限）
-    try:
-        import subprocess
-        git_dir = os.path.join(BASE_DIR, ".git")
-        if os.path.exists(git_dir):
-            subprocess.run(["git", "add", "configs/api_keys.py"], cwd=BASE_DIR, capture_output=True, timeout=10)
-            subprocess.run(["git", "commit", "-m", f"chore: update {var_name}"], cwd=BASE_DIR, capture_output=True, timeout=10)
-            subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True, timeout=15)
-            print(f"[config] Git pushed {var_name}")
-    except Exception as e:
-        print(f"[config] Git push skipped: {e}")
-
-
-# ============================================================
-# API: Upload videos manually (bypass Apify)
-# ============================================================
-@app.route("/api/upload/videos", methods=["POST"])
-def api_upload_videos():
-    """Upload video list manually (JSON format)"""
-    data = request.get_json()
-    username = data.get("username", "")
-    platform = data.get("platform", "Instagram")
-    videos = data.get("videos", [])
-    language = data.get("language", "en")
-
-    if not videos:
-        return jsonify({"error": "No videos provided"}), 400
-
-    # Save to cache
-    normalized = []
-    for v in videos:
-        normalized.append({
-            "标题": v.get("title", v.get("标题", "")),
-            "发布日期": v.get("date", v.get("发布日期", "")),
-            "视频链接": v.get("url", v.get("视频链接", "")),
-            "评论数": v.get("comments_count", v.get("评论数", 0)),
-        })
-    save_cached_videos(username, platform, normalized)
-
-    # Select classifier
-    if language == "es":
-        es_config = load_es_config()
-        classify_fn = lambda t: classify_title_es(t, es_config)
-    else:
-        en_config = load_en_config()
-        classify_fn = lambda t: classify_title_en(t, en_config)
-
-    # Classify
-    results = []
-    for v in normalized:
-        title = v.get("标题", "")
-        brand, keywords, category, basis = classify_title_en(title, en_config)
-        results.append({
-            "发布日期": v.get("发布日期", ""),
-            "达人ID": username,
-            "平台": platform,
-            "标题": title,
-            "视频链接": v.get("视频链接", ""),
-            "评论数": int(v.get("评论数", 0) or 0),
-            "分类": category,
-            "命中品牌": brand or "",
-            "命中关键词": keywords or "",
-            "分类依据": basis,
-        })
-
-    return jsonify({
-        "username": username, "platform": platform,
-        "videos": results, "source": "upload",
-        "message": f"已导入 {len(results)} 条视频"
-    })
-
-
-# ============================================================
-# API: Download Excel — Sheet-1 视频明细 + Sheet-2 评论明细
-# ============================================================
-@app.route("/api/download/excel", methods=["POST"])
-def api_download_excel():
-    """Generate multi-sheet Excel: Sheet-1 videos + Sheet-2 comments"""
-    data = request.get_json()
-    videos = data.get("videos", [])
-    comments_data = data.get("comments", {})
-    username = data.get("username", "unknown")
-    platform = data.get("platform", "")
-
-    if not videos:
-        return jsonify({"error": "No video data"}), 400
-
-    import io
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
-    wb = Workbook()
-
-    # --- Sheet 1: 视频明细 ---
-    ws1 = wb.active
-    ws1.title = "视频明细"
-
-    headers1 = ['发布日期','达人ID','平台','标题','视频链接','评论数','分类','命中品牌','命中关键词','分类依据']
-    ws1.append(headers1)
-
-    # Header style
-    header_fill = PatternFill(start_color="1e293b", end_color="1e293b", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True, size=11)
-    for cell in ws1[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    # Data rows
-    for v in videos:
-        title = v.get('标题', '')
-        if len(title) > 120:
-            title = title[:120] + "..."
-        row = [
-            v.get('发布日期', ''),
-            v.get('达人ID', username),
-            v.get('平台', platform),
-            title,
-            v.get('视频链接', ''),
-            v.get('评论数', 0),
-            v.get('分类', ''),
-            v.get('命中品牌', ''),
-            v.get('命中关键词', ''),
-            v.get('分类依据', ''),
-        ]
-        ws1.append(row)
-
-    # Auto-width for Sheet 1
-    for col_idx, col in enumerate(ws1.columns, 1):
-        max_len = 0
-        col_letter = get_column_letter(col_idx)
-        for cell in col:
-            try:
-                val_len = len(str(cell.value)) if cell.value else 0
-                if val_len > max_len:
-                    max_len = min(val_len, 60)
-            except:
-                pass
-        ws1.column_dimensions[col_letter].width = min(max_len + 4, 50)
-
-    # Freeze header
-    ws1.freeze_panes = "A2"
-
-    # --- Sheet 2: 评论明细 ---
-    ws2 = wb.create_sheet(title="评论明细")
-
-    headers2 = ['达人ID','平台','视频标题','视频链接','评论用户名','评论内容','点赞数','评论分类','匹配信号词','抓取来源']
-    ws2.append(headers2)
-
-    for cell in ws2[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
-    # Build video title/url lookup
-    video_lookup = {}
-    for v in videos:
-        url = v.get('视频链接', '')
-        video_lookup[url] = {
-            'title': v.get('标题', '')[:120] + ("..." if len(v.get('标题', '')) > 120 else ""),
-            'url': url,
-        }
-
-    # Populate comments from both parts
-    part1 = comments_data.get("part1_top3_hot", {})
-    part2 = comments_data.get("part2_top3_sponsored", {})
-
-    for part_name, part in [("Part1-热门", part1), ("Part2-赞助", part2)]:
-        if not part or not part.get("videos"):
-            continue
-        for v in part["videos"]:
-            url = v.get("url", "")
-            v_info = video_lookup.get(url, {"title": v.get("title", ""), "url": url})
-            for c in v.get("classified_comments", []):
-                signals = c.get("matched_signals", [])
-                signals_str = ", ".join(signals) if isinstance(signals, list) else str(signals)
-                row = [
-                    username,
-                    platform,
-                    v_info["title"],
-                    v_info["url"],
-                    c.get("username", "N/A"),
-                    c.get("text", ""),
-                    c.get("likes", 0),
-                    c.get("category", ""),
-                    signals_str,
-                    part_name,
-                ]
-                ws2.append(row)
-
-    # Auto-width for Sheet 2
-    for col_idx, col in enumerate(ws2.columns, 1):
-        max_len = 0
-        col_letter = get_column_letter(col_idx)
-        for cell in col:
-            try:
-                val_len = len(str(cell.value)) if cell.value else 0
-                if val_len > max_len:
-                    max_len = min(val_len, 80)
-            except:
-                pass
-        ws2.column_dimensions[col_letter].width = min(max_len + 4, 60)
-
-    # Wrap text for comment content column (column F = 6)
-    for row in ws2.iter_rows(min_row=2, max_row=ws2.max_row, min_col=6, max_col=6):
-        for cell in row:
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-    ws2.freeze_panes = "A2"
-
-    # Save to bytes
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-
-    from flask import send_file
-    filename = f"达人分析_{username}_{platform}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-    return send_file(
-        output,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=filename
-    )
-
-
-# ============================================================
-# API: Batch analyze — 批量分析多达人
-# ============================================================
 @app.route("/api/batch/analyze", methods=["POST"])
 def api_batch_analyze():
-    """批量分析达人：依次检查缓存，返回哪些有缓存、哪些需要 Apify"""
+    """检查多个达人的缓存状态"""
     try:
         data = request.get_json()
         inputs = data.get("inputs", [])
@@ -1644,86 +968,70 @@ def api_batch_analyze():
         days = int(data.get("days", 30))
         language = data.get("language", "en")
 
-        if not inputs:
-            return jsonify({"error": "请提供达人列表"}), 400
-
-        results = []
+        cached = []
         need_apify = []
-        cached_results = []
 
         for inp in inputs:
-            username = extract_username(inp.strip(), platform)
+            username = extract_username(inp, platform)
             if not username:
                 continue
-
-            need_refresh, cached, msg = needs_apify_refresh(username, platform, days)
-
-            if not need_refresh and cached:
-                cached_results.append({
-                    "username": username,
-                    "video_count": len(cached),
-                    "status": "cached",
-                })
+            need_refresh, cached_videos, msg = needs_apify_refresh(username, platform, days)
+            if need_refresh:
+                need_apify.append({"username": username, "cached_count": len(cached_videos), "message": msg})
             else:
-                need_apify.append({
-                    "username": username,
-                    "cached_count": len(cached) if cached else 0,
-                    "status": "need_apify",
-                })
+                cached.append({"username": username, "count": len(cached_videos), "message": msg})
 
         return jsonify({
-            "cached": cached_results,
-            "need_apify": need_apify,
             "total": len(inputs),
-            "cached_count": len(cached_results),
-            "need_apify_count": len(need_apify),
-            "platform": platform,
-            "language": language,
-            "days": days,
+            "cached": cached,
+            "need_apify": need_apify,
         })
     except Exception as e:
         import traceback
-        return jsonify({"error": f"批量分析检查失败: {str(e)}", "trace": traceback.format_exc()}), 500
+        return jsonify({"error": f"批量检查失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
 @app.route("/api/batch/fetch", methods=["POST"])
 def api_batch_fetch():
-    """批量 Apify 抓取 + 分类"""
+    """批量 Apify 抓取 + 分类（同步，前端逐个轮询）"""
     try:
         data = request.get_json()
         usernames = data.get("usernames", [])
         platform = data.get("platform", "Instagram")
         days = int(data.get("days", 30))
         language = data.get("language", "en")
-        api_key = data.get("api_key") or APIFY_API_KEY
 
-        if not usernames:
-            return jsonify({"error": "请提供需要抓取的达人列表"}), 400
+        en_config = load_en_config() if language != "es" else None
+        es_config = load_es_config() if language == "es" else None
 
-        # Select classifier
-        if language == "es":
-            es_config = load_es_config()
-            classify_fn = lambda t: classify_title_es(t, es_config)
-        else:
-            en_config = load_en_config()
-            classify_fn = lambda t: classify_title_en(t, en_config)
+        results = []
+        total_done = 0
+        total_error = 0
 
-        all_results = []
-        for i, username in enumerate(usernames):
+        for username in usernames:
             try:
-                if "instagram" in platform.lower():
-                    videos = fetch_instagram_videos(username, api_key, days)
+                cached_videos = load_cached_videos(username, platform)
+                
+                if platform.lower() == "instagram":
+                    new_videos = fetch_instagram_videos(username, days)
                 else:
-                    videos = fetch_tiktok_videos(username, api_key, days)
-
-                old_cached = load_cached_videos(username, platform)
-                merged = merge_videos(old_cached, videos)
+                    new_videos = fetch_tiktok_videos(username, days)
+                
+                merged = merge_videos(cached_videos, new_videos)
                 save_cached_videos(username, platform, merged)
-
+                
+                # Classify + LLM fallback
                 classified = []
-                for v in merged:
+                unclassified_titles = []
+                unclassified_indices = []
+                
+                for i, v in enumerate(merged):
                     title = v.get("标题", v.get("title", ""))
-                    brand, keywords, category, basis = classify_fn(title)
+                    brand, keywords, category, basis = _wrap_classify(title, language, en_config, es_config)
+                    if category == "其他" and basis == "No rule matched":
+                        unclassified_titles.append(title)
+                        unclassified_indices.append(i)
+                    
                     classified.append({
                         "发布日期": v.get("发布日期", v.get("date", "")),
                         "达人ID": username,
@@ -1736,34 +1044,755 @@ def api_batch_fetch():
                         "命中关键词": keywords or "",
                         "分类依据": basis,
                     })
-
-                all_results.append({
-                    "username": username,
-                    "videos": classified,
-                    "new_count": len(videos),
-                    "total_count": len(merged),
-                    "status": "ok",
-                })
+                
+                # LLM 兜底：对未命中的标题做批量分类
+                if en_config and unclassified_titles:
+                    llm_results = _llm_classify_titles(unclassified_titles, en_config)
+                    for idx, cat in llm_results.items():
+                        if idx < len(classified):
+                            classified[idx]["分类"] = cat
+                            classified[idx]["分类依据"] = "LLM fallback"
+                
+                results.append({"username": username, "videos": classified, "error": None})
+                total_done += 1
             except Exception as e:
-                all_results.append({
-                    "username": username,
-                    "videos": [],
-                    "status": "error",
-                    "error": str(e),
-                })
+                results.append({"username": username, "videos": [], "error": str(e)})
+                total_error += 1
 
-        return jsonify({
-            "results": all_results,
-            "platform": platform,
-            "language": language,
-            "total_done": len([r for r in all_results if r["status"] == "ok"]),
-            "total_error": len([r for r in all_results if r["status"] == "error"]),
-        })
+        return jsonify({"results": results, "total_done": total_done, "total_error": total_error})
     except Exception as e:
         import traceback
         return jsonify({"error": f"批量抓取失败: {str(e)}", "trace": traceback.format_exc()}), 500
 
 
+# ============================================================
+# API: Apify 异步抓取 + 状态轮询
+# ============================================================
+
+def _apify_fetch_task(task_id, username, platform, days, language):
+    """异步 Apify 抓取任务"""
+    try:
+        _async_tasks[task_id]["status"] = "running"
+        cached = load_cached_videos(username, platform)
+        
+        if platform.lower() == "instagram":
+            new_videos = fetch_instagram_videos(username, days)
+        else:
+            new_videos = fetch_tiktok_videos(username, days)
+        
+        merged = merge_videos(cached, new_videos)
+        save_cached_videos(username, platform, merged)
+        
+        en_config = load_en_config() if language != "es" else None
+        es_config = load_es_config() if language == "es" else None
+        
+        classified = []
+        unclassified_titles = []
+        unclassified_indices = []
+        
+        for i, v in enumerate(merged):
+            title = v.get("标题", v.get("title", ""))
+            brand, keywords, category, basis = _wrap_classify(title, language, en_config, es_config)
+            if category == "其他" and basis == "No rule matched":
+                unclassified_titles.append(title)
+                unclassified_indices.append(i)
+            
+            classified.append({
+                "发布日期": v.get("发布日期", v.get("date", "")),
+                "达人ID": username,
+                "平台": platform,
+                "标题": title,
+                "视频链接": v.get("视频链接", v.get("url", "")),
+                "评论数": int(v.get("评论数", v.get("comments_count", 0)) or 0),
+                "分类": category,
+                "命中品牌": brand or "",
+                "命中关键词": keywords or "",
+                "分类依据": basis,
+            })
+        
+        # LLM 兜底
+        if en_config and unclassified_titles:
+            llm_results = _llm_classify_titles(unclassified_titles, en_config)
+            for idx, cat in llm_results.items():
+                if idx < len(classified):
+                    classified[idx]["分类"] = cat
+                    classified[idx]["分类依据"] = "LLM fallback"
+        
+        _async_tasks[task_id] = {
+            "status": "done",
+            "result": {
+                "username": username,
+                "platform": platform,
+                "videos": classified,
+                "total": len(classified),
+                "message": f"Apify 抓取完成：{len(classified)} 条视频",
+            }
+        }
+    except Exception as e:
+        _async_tasks[task_id] = {"status": "error", "error": str(e)}
+
+
+@app.route("/api/apify/fetch", methods=["POST"])
+def api_apify_fetch():
+    """启动 Apify 异步抓取任务"""
+    try:
+        data = request.get_json()
+        username = extract_username(data.get("input", data.get("username", "")), data.get("platform", ""))
+        platform = data.get("platform", "Instagram")
+        days = int(data.get("days", 30))
+        language = data.get("language", "en")
+        
+        if not username:
+            return jsonify({"error": "无法解析达人ID"}), 400
+        
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started"}
+        
+        threading.Thread(target=_apify_fetch_task, args=(task_id, username, platform, days, language), daemon=True).start()
+        
+        return jsonify({"task_id": task_id, "status": "started", "username": username})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/apify/status/<task_id>")
+def api_apify_status(task_id):
+    """查询 Apify 抓取任务状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"})
+    return jsonify(task)
+
+
+# ============================================================
+# API: Single video analysis (Panel 2)
+# ============================================================
+
+def _video_analyze_task(task_id, url, detected_platform, language):
+    """异步单条视频分析任务"""
+    try:
+        _async_tasks[task_id]["status"] = "running"
+        
+        # Fetch metadata
+        metadata = _fetch_video_metadata_sc(url, detected_platform)
+        
+        # Fetch transcript
+        transcript = _fetch_transcript_sc(url, detected_platform)
+        
+        # Fetch comments
+        comments_raw = _fetch_comments_single_video_sc(url, detected_platform, target_valid=50)
+        
+        # Classify comments
+        comment_config = load_comment_config()
+        classified_comments = []
+        unclassified_texts = []
+        unclassified_indices = []
+        
+        for i, c in enumerate(comments_raw):
+            text = c.get("text", "")
+            cat_key, name_en, name_zh, signals = classify_single_comment(text, comment_config)
+            classified_comments.append({
+                "text": text[:200],
+                "likes": c.get("likes", 0),
+                "username": c.get("username", ""),
+                "category": name_zh,
+                "category_key": cat_key,
+                "matched_signals": signals,
+            })
+            if cat_key == "other":
+                unclassified_texts.append(text[:200])
+                unclassified_indices.append(len(classified_comments) - 1)
+        
+        # LLM 兜底：评论分类
+        if comment_config.get("llm_fallback", {}).get("enabled") and unclassified_texts:
+            llm_results = _llm_classify_comments(unclassified_texts, comment_config)
+            for idx, cat_key in llm_results.items():
+                if idx < len(classified_comments):
+                    cat_info = COMMENT_CAT_NAMES.get(cat_key, {})
+                    classified_comments[idx]["category_key"] = cat_key
+                    classified_comments[idx]["category"] = COMMENT_CAT_NAMES.get(cat_key, "其他")
+        
+        # DeepSeek content analysis
+        comments_sample = [{"text": c.get("text", "")} for c in comments_raw[:15]]
+        analysis = _analyze_video_with_deepseek(transcript, comments_sample, language)
+        
+        _async_tasks[task_id] = {
+            "status": "done",
+            "result": {
+                "metadata": metadata,
+                "transcript": transcript or "",
+                "analysis": analysis,
+                "comments": classified_comments,
+                "total_comments": len(comments_raw),
+            }
+        }
+    except Exception as e:
+        import traceback
+        _async_tasks[task_id] = {"status": "error", "error": f"{str(e)}\n{traceback.format_exc()}"}
+
+
+@app.route("/api/video/analyze", methods=["POST"])
+def api_video_analyze():
+    """启动单条视频分析"""
+    try:
+        data = request.get_json()
+        url = data.get("url", "").strip()
+        platform = data.get("platform", "")
+        language = data.get("language", "en")
+        
+        if not url:
+            return jsonify({"error": "请输入视频链接"}), 400
+        
+        detected_platform = platform or _detect_platform(url)
+        if not detected_platform:
+            return jsonify({"error": "无法识别平台，请手动选择"}), 400
+        
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started"}
+        
+        threading.Thread(target=_video_analyze_task, args=(task_id, url, detected_platform, language), daemon=True).start()
+        
+        return jsonify({"task_id": task_id, "status": "started"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/video/status/<task_id>")
+def api_video_status(task_id):
+    """查询视频分析任务状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"})
+    return jsonify(task)
+
+
+# ============================================================
+# API: Paste Views (Panel 3)
+# ============================================================
+
+def _paste_views_task(task_id, tk_urls, ig_urls):
+    """异步批量抓取 View 数据"""
+    try:
+        _async_tasks[task_id]["status"] = "running"
+        tk_lines = [l.strip() for l in tk_urls.split("\n") if l.strip()] if tk_urls else []
+        ig_lines = [l.strip() for l in ig_urls.split("\n") if l.strip()] if ig_urls else []
+        
+        total_rows = max(len(tk_lines), len(ig_lines))
+        rows = []
+        
+        for i in range(total_rows):
+            row = {"row": i + 1, "tk_view": None, "ig_view": None, "tk_error": None, "ig_error": None}
+            
+            if i < len(tk_lines) and tk_lines[i]:
+                try:
+                    meta = _fetch_video_metadata_sc(tk_lines[i], "TikTok")
+                    row["tk_view"] = meta.get("views", 0)
+                except Exception as e:
+                    row["tk_error"] = str(e)[:100]
+            
+            if i < len(ig_lines) and ig_lines[i]:
+                try:
+                    meta = _fetch_video_metadata_sc(ig_lines[i], "Instagram")
+                    row["ig_view"] = meta.get("views", 0)
+                except Exception as e:
+                    row["ig_error"] = str(e)[:100]
+            
+            rows.append(row)
+        
+        _async_tasks[task_id] = {"status": "done", "result": {"rows": rows, "total": total_rows}}
+    except Exception as e:
+        _async_tasks[task_id] = {"status": "error", "error": str(e)}
+
+
+@app.route("/api/videos/views/paste", methods=["POST"])
+def api_paste_views():
+    """批量 paste 链接，抓取 View"""
+    try:
+        data = request.get_json()
+        tk_urls = data.get("tk_urls", "").strip()
+        ig_urls = data.get("ig_urls", "").strip()
+        
+        tk_lines = [l.strip() for l in tk_urls.split("\n") if l.strip()] if tk_urls else []
+        ig_lines = [l.strip() for l in ig_urls.split("\n") if l.strip()] if ig_urls else []
+        total = max(len(tk_lines), len(ig_lines))
+        
+        if total == 0:
+            return jsonify({"error": "请至少粘贴一条链接"}), 400
+        
+        task_id = str(uuid.uuid4())[:8]
+        _async_tasks[task_id] = {"status": "started"}
+        
+        threading.Thread(target=_paste_views_task, args=(task_id, tk_urls, ig_urls), daemon=True).start()
+        
+        return jsonify({"task_id": task_id, "status": "started", "total": total})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/videos/views/status/<task_id>")
+def api_paste_views_status(task_id):
+    """查询 View 抓取状态"""
+    task = _async_tasks.get(task_id)
+    if not task:
+        return jsonify({"status": "not_found", "error": "任务不存在或已过期"})
+    return jsonify(task)
+
+
+# ============================================================
+# API: Upload videos
+# ============================================================
+
+@app.route("/api/upload/videos", methods=["POST"])
+def api_upload_videos():
+    """上传视频 JSON 数据"""
+    try:
+        data = request.get_json()
+        username = data.get("username", "")
+        platform = data.get("platform", "Instagram")
+        videos = data.get("videos", [])
+        
+        if not username or not videos:
+            return jsonify({"error": "缺少必要参数"}), 400
+        
+        # Normalize fields
+        normalized = []
+        for v in videos:
+            normalized.append({
+                "发布日期": v.get("date", v.get("发布日期", "")),
+                "标题": v.get("title", v.get("标题", "")),
+                "视频链接": v.get("url", v.get("视频链接", "")),
+                "评论数": int(v.get("comments_count", v.get("评论数", 0)) or 0),
+            })
+        
+        save_cached_videos(username, platform, normalized)
+        
+        return jsonify({
+            "message": f"已保存 {len(normalized)} 条视频",
+            "videos": normalized,
+            "username": username,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
+# API: Excel Download
+# ============================================================
+
+@app.route("/api/download/excel", methods=["POST"])
+def api_download_excel():
+    """生成并下载 Excel 报告"""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from io import BytesIO
+        
+        data = request.get_json()
+        videos = data.get("videos", [])
+        comments_data = data.get("comments", {})
+        username = data.get("username", "unknown")
+        platform = data.get("platform", "")
+        
+        wb = openpyxl.Workbook()
+        
+        # Sheet 1: 视频选题分析
+        ws1 = wb.active
+        ws1.title = "视频选题分析"
+        headers = ["发布日期", "达人ID", "平台", "标题", "视频链接", "评论数", "分类", "命中品牌", "命中关键词", "分类依据"]
+        for col, h in enumerate(headers, 1):
+            cell = ws1.cell(row=1, column=col, value=h)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+            cell.alignment = Alignment(horizontal="center")
+        
+        for row_idx, v in enumerate(videos, 2):
+            ws1.cell(row=row_idx, column=1, value=v.get("发布日期", ""))
+            ws1.cell(row=row_idx, column=2, value=v.get("达人ID", username))
+            ws1.cell(row=row_idx, column=3, value=v.get("平台", platform))
+            ws1.cell(row=row_idx, column=4, value=v.get("标题", ""))
+            ws1.cell(row=row_idx, column=5, value=v.get("视频链接", ""))
+            ws1.cell(row=row_idx, column=6, value=v.get("评论数", 0))
+            ws1.cell(row=row_idx, column=7, value=v.get("分类", ""))
+            ws1.cell(row=row_idx, column=8, value=v.get("命中品牌", ""))
+            ws1.cell(row=row_idx, column=9, value=v.get("命中关键词", ""))
+            ws1.cell(row=row_idx, column=10, value=v.get("分类依据", ""))
+        
+        ws1.column_dimensions['D'].width = 40
+        ws1.column_dimensions['E'].width = 35
+        
+        # Sheet 2: 评论分析（Part 1 + Part 2）
+        ws2 = wb.create_sheet("评论分析")
+        row = 1
+        
+        for part_key, part_title in [("part1_top3_hot", "Part 1: TOP-3 热门视频评论"), ("part2_top3_sponsored", "Part 2: TOP-3 赞助/种草视频评论")]:
+            part = comments_data.get(part_key, {})
+            if not part:
+                continue
+            
+            cell = ws2.cell(row=row, column=1, value=part_title)
+            cell.font = Font(bold=True, size=14)
+            row += 1
+            
+            cell = ws2.cell(row=row, column=1, value=f"购买意向评分: {part.get('purchase_intent_score', 'N/A')} ({part.get('purchase_intent_label', '')})")
+            cell.font = Font(bold=True, color="4472C4")
+            row += 2
+            
+            for v in part.get("videos", []):
+                ws2.cell(row=row, column=1, value=f"视频: {v.get('title', '')[:80]}")
+                ws2.cell(row=row, column=1).font = Font(bold=True)
+                row += 1
+                
+                # Comment headers
+                for col, h in enumerate(["评论内容", "点赞", "用户名", "分类"], 1):
+                    cell = ws2.cell(row=row, column=col, value=h)
+                    cell.font = Font(bold=True)
+                row += 1
+                
+                for c in v.get("classified_comments", []):
+                    ws2.cell(row=row, column=1, value=c.get("text", "")[:200])
+                    ws2.cell(row=row, column=2, value=c.get("likes", 0))
+                    ws2.cell(row=row, column=3, value=c.get("username", ""))
+                    ws2.cell(row=row, column=4, value=c.get("category", ""))
+                    row += 1
+                row += 1
+        
+        ws2.column_dimensions['A'].width = 50
+        
+        # Save to BytesIO
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        from flask import send_file
+        filename = f"达人分析_{username}_{platform}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename,
+        )
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"Excel 生成失败: {str(e)}", "trace": traceback.format_exc()}), 500
+
+
+# ============================================================
+# API: Config Management
+# ============================================================
+
+@app.route("/api/config/keys")
+def api_config_keys():
+    """返回 API Key 设置状态（不暴露完整 Key）"""
+    def _mask(k):
+        if not k:
+            return "未设置"
+        if len(k) <= 8:
+            return k[:2] + "***"
+        return k[:4] + "***" + k[-4:]
+    
+    return jsonify({
+        "scrapecreators": {
+            "set": bool(SC_API_KEYS and SC_API_KEYS[0]),
+            "masked": _mask(SC_API_KEYS[0]) if SC_API_KEYS else "",
+            "count": len(SC_API_KEYS),
+        },
+        "apify": {
+            "set": bool(APIFY_API_KEY),
+            "masked": _mask(APIFY_API_KEY),
+        },
+        "deepseek": {
+            "set": bool(DEEPSEEK_API_KEY),
+            "masked": _mask(DEEPSEEK_API_KEY),
+        }
+    })
+
+
+@app.route("/api/config/credits")
+def api_config_credits():
+    """查询各 API 额度"""
+    sc = _check_sc_credits()
+    ap = _check_apify_credits()
+    return jsonify({
+        "scrapecreators": sc,
+        "apify": ap,
+    })
+
+
+@app.route("/api/config/scrapecreators-key", methods=["POST"])
+def api_set_sc_key():
+    try:
+        data = request.get_json()
+        key = data.get("key", "").strip()
+        if not key:
+            return jsonify({"error": "Key 不能为空"}), 400
+        # Update api_keys.py
+        _api_keys.SCRAPECREATORS_API_KEY = key
+        with open(os.path.join(BASE_DIR, "configs", "api_keys.py"), "w", encoding="utf-8") as f:
+            f.write(f'# API Keys for influencer-hub\n')
+            f.write(f'SCRAPECREATORS_API_KEY = """{key}"""\n')
+            f.write(f'DEEPSEEK_API_KEY = """{DEEPSEEK_API_KEY}"""\n')
+            f.write(f'APIFY_API_KEY = """{APIFY_API_KEY}"""\n')
+        reload_api_keys()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/config/apify-key", methods=["POST"])
+def api_set_apify_key():
+    try:
+        data = request.get_json()
+        key = data.get("key", "").strip()
+        if not key:
+            return jsonify({"error": "Key 不能为空"}), 400
+        _api_keys.APIFY_API_KEY = key
+        with open(os.path.join(BASE_DIR, "configs", "api_keys.py"), "w", encoding="utf-8") as f:
+            f.write(f'# API Keys for influencer-hub\n')
+            f.write(f'SCRAPECREATORS_API_KEY = """{SC_API_KEY}"""\n')
+            if len(SC_API_KEYS) > 1:
+                f.write(f'# 多 Key 支持：\n')
+                f.write(f'SCRAPECREATORS_API_KEY = """{",".join(SC_API_KEYS)}"""\n')
+            else:
+                f.write(f'SCRAPECREATORS_API_KEY = """{SC_API_KEY}"""\n')
+            f.write(f'DEEPSEEK_API_KEY = """{DEEPSEEK_API_KEY}"""\n')
+            f.write(f'APIFY_API_KEY = """{key}"""\n')
+        reload_api_keys()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/config/deepseek-key", methods=["POST"])
+def api_set_deepseek_key():
+    try:
+        data = request.get_json()
+        key = data.get("key", "").strip()
+        if not key:
+            return jsonify({"error": "Key 不能为空"}), 400
+        _api_keys.DEEPSEEK_API_KEY = key
+        with open(os.path.join(BASE_DIR, "configs", "api_keys.py"), "w", encoding="utf-8") as f:
+            f.write(f'# API Keys for influencer-hub\n')
+            if len(SC_API_KEYS) > 1:
+                f.write(f'SCRAPECREATORS_API_KEY = """{",".join(SC_API_KEYS)}"""\n')
+            else:
+                f.write(f'SCRAPECREATORS_API_KEY = """{SC_API_KEY}"""\n')
+            f.write(f'DEEPSEEK_API_KEY = """{key}"""\n')
+            f.write(f'APIFY_API_KEY = """{APIFY_API_KEY}"""\n')
+        reload_api_keys()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================
+# API: Panel 4 — 批量评论洞察（视频链接分组对比）
+# ============================================================
+
+@app.route("/api/batch/comments", methods=["POST"])
+def api_batch_comments():
+    """
+    按垂类达人 / 生活种草达人两组视频链接，抓取评论并分类对比。
+    Input: {
+        vertical_links: [...],
+        lifestyle_links: [...],
+        platform: "Instagram|TikTok",
+        comment_count: 20
+    }
+    Output: {
+        vertical: {total_videos, total_comments, distribution, top_comments},
+        lifestyle: {total_videos, total_comments, distribution, top_comments},
+        insights: {text}  // LLM 生成的对比洞察
+    }
+    """
+    try:
+        data = request.get_json()
+        vertical_links = data.get("vertical_links", [])
+        lifestyle_links = data.get("lifestyle_links", [])
+        platform = data.get("platform", "Instagram")
+        comment_count = int(data.get("comment_count", 20))
+
+        if not vertical_links and not lifestyle_links:
+            return jsonify({"error": "请至少输入一条视频链接"}), 400
+
+        comment_config = load_comment_config()
+
+        # --- Analyze one group of video links ---
+        def analyze_group(links, group_name):
+            """对一组视频链接并行抓取评论、分类、汇总"""
+            all_classified = []
+            successful_videos = 0
+            video_errors = []
+
+            def analyze_single_video(url):
+                nonlocal successful_videos
+                nonlocal all_classified
+                result = {"url": url, "classified": [], "error": None, "title": ""}
+                try:
+                    comments_raw = fetch_comments_for_video(url, platform)
+                    valid = get_top_valid_comments(comments_raw, comment_count)
+                    for c in valid:
+                        cat_key, name_en, name_zh, signals = classify_single_comment(c["text"], comment_config)
+                        result["classified"].append({
+                            "text": c["text"][:200],
+                            "likes": c["likes"],
+                            "username": c.get("username", ""),
+                            "category_key": cat_key,
+                            "category": name_zh,
+                            "matched_signals": signals,
+                        })
+                    successful_videos += 1
+                except Exception as e:
+                    result["error"] = str(e)
+                return result
+
+            # Parallel fetch per video (max 4 concurrent)
+            with ThreadPoolExecutor(max_workers=min(4, len(links))) as ex:
+                futures = {ex.submit(analyze_single_video, url): url for url in links if url.strip()}
+                for f in futures:
+                    r = f.result()
+                    if r["error"]:
+                        video_errors.append({"url": r["url"], "error": r["error"]})
+                    all_classified.extend(r["classified"])
+
+            # LLM 兜底：对 other 评论尝试重新分类
+            if comment_config.get("llm_fallback", {}).get("enabled", False):
+                unclassified = [(i, c) for i, c in enumerate(all_classified) if c["category_key"] == "other"]
+                if unclassified:
+                    texts = [c[1]["text"] for c in unclassified]
+                    try:
+                        llm_results = _llm_classify_comments(texts, comment_config)
+                        for local_idx, cat_key in llm_results.items():
+                            if local_idx < len(unclassified):
+                                orig_idx = unclassified[local_idx][0]
+                                all_classified[orig_idx]["category_key"] = cat_key
+                                all_classified[orig_idx]["category"] = COMMENT_CAT_NAMES.get(cat_key, "其他")
+                    except Exception:
+                        pass
+
+            # Distribution
+            dist = {}
+            for k in ["content_engagement", "purchase_intent", "product_interaction", "other"]:
+                dist[k] = {"count": 0, "pct": 0, "name_zh": COMMENT_CAT_NAMES.get(k, k)}
+
+            for c in all_classified:
+                ck = c["category_key"]
+                if ck in dist:
+                    dist[ck]["count"] += 1
+
+            total = len(all_classified)
+            for k in dist:
+                dist[k]["pct"] = round(dist[k]["count"] / total * 100, 1) if total > 0 else 0
+
+            # Purchase intent score
+            score, label = _calc_purchase_intent(all_classified, comment_config)
+
+            # Top purchase intent comments
+            pi_comments = [c for c in all_classified if c["category_key"] == "purchase_intent"]
+            pi_comments.sort(key=lambda c: c.get("likes", 0), reverse=True)
+
+            return {
+                "group": group_name,
+                "total_videos": successful_videos,
+                "total_links": len(links),
+                "total_comments": total,
+                "distribution": dist,
+                "purchase_intent_score": score,
+                "purchase_intent_label": label,
+                "top_comments": pi_comments[:10],
+                "errors": video_errors[:5],
+            }
+
+        # Analyze both groups in parallel
+        vertical_result = None
+        lifestyle_result = None
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fv = ex.submit(analyze_group, vertical_links, "垂类达人") if vertical_links else None
+            fl = ex.submit(analyze_group, lifestyle_links, "生活种草达人") if lifestyle_links else None
+            if fv:
+                vertical_result = fv.result()
+            if fl:
+                lifestyle_result = fl.result()
+
+        # LLM 生成对比洞察
+        insights = None
+        if vertical_result and lifestyle_result:
+            try:
+                insights = _llm_generate_comparison_insights(vertical_result, lifestyle_result)
+            except Exception:
+                insights = {"text": "LLM 洞察生成失败，请查看下方统计数据。"}
+
+        return jsonify({
+            "vertical": vertical_result,
+            "lifestyle": lifestyle_result,
+            "insights": insights,
+            "platform": platform,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": f"批量评论分析失败: {str(e)}", "trace": traceback.format_exc()}), 500
+
+
+def _llm_generate_comparison_insights(vertical, lifestyle):
+    """用 DeepSeek 生成两组评论的对比洞察"""
+    if not DEEPSEEK_CLIENT:
+        return {"text": "DeepSeek API Key 未配置，无法生成洞察。"}
+
+    # Build comparison prompts
+    v_pi_pct = vertical.get("distribution", {}).get("purchase_intent", {}).get("pct", 0)
+    l_pi_pct = lifestyle.get("distribution", {}).get("purchase_intent", {}).get("pct", 0)
+    v_dist = ", ".join(
+        f"{COMMENT_CAT_NAMES.get(k,k)}:{d['count']}条({d['pct']}%)"
+        for k, d in vertical.get("distribution", {}).items()
+    )
+    l_dist = ", ".join(
+        f"{COMMENT_CAT_NAMES.get(k,k)}:{d['count']}条({d['pct']}%)"
+        for k, d in lifestyle.get("distribution", {}).items()
+    )
+    v_top = "\n".join([f"- {c['text'][:80]}" for c in vertical.get("top_comments", [])[:5]] or ["无"])
+    l_top = "\n".join([f"- {c['text'][:80]}" for c in lifestyle.get("top_comments", [])[:5]] or ["无"])
+
+    prompt = f"""你是社交媒体评论分析师。请对比以下两组达人的评论区数据，给出中文洞察。
+
+【垂类达人】
+评论统计: {v_dist}
+总评论数: {vertical.get('total_comments', 0)}
+购买意向 TOP 评论:
+{v_top}
+
+【生活种草达人】
+评论统计: {l_dist}
+总评论数: {lifestyle.get('total_comments', 0)}
+购买意向 TOP 评论:
+{l_top}
+
+请分点回复（3段，每段1-2句话）：
+1. 购买意向对比（两组差异 + 原因推测）
+2. 评论互动特征差异
+3. 运营建议
+
+JSON 格式输出：{{"text": "完整洞察文本"}}"""
+
+    try:
+        r = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=400,
+        )
+        content = r.choices[0].message.content.strip()
+        if "{" in content and "}" in content:
+            json_match = content[content.index("{"):content.rindex("}") + 1]
+            return json.loads(json_match)
+        return {"text": content}
+    except Exception as e:
+        return {"text": f"洞察生成异常: {str(e)}"}
+
+
+# ============================================================
+# App Entry
+# ============================================================
+
 if __name__ == "__main__":
-    os.makedirs(os.path.join(BASE_DIR, "templates"), exist_ok=True)
-    app.run(host="0.0.0.0", port=8504, debug=False)
+    port = int(os.environ.get("PORT", 8504))
+    print(f"🚀 达人分析系统 v4.0 启动在端口 {port}")
+    app.run(host="0.0.0.0", port=port, debug=True)

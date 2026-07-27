@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>达人账号分析系统 v3.0</title>
+<title>达人账号分析系统 v4.0</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7;color:#333;background:#f0f2f5;padding:20px}
@@ -78,12 +78,9 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 .comment-item{padding:6px 0;font-size:13px;border-bottom:1px dashed #e2e8f0}
 .comment-item:last-child{border-bottom:none}
 .comment-cat{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px;font-weight:600}
-.c-inquiry{background:#fee2e2;color:#991b1b}
+.c-engagement{background:#dbeafe;color:#1e40af}
 .c-intent{background:#ffedd5;color:#c2410c}
-.c-discuss{background:#fef3c7;color:#92400e}
-.c-positive{background:#d1fae5;color:#065f46}
-.c-negative{background:#fee2e2;color:#991b1b}
-.c-social{background:#dbeafe;color:#1e40af}
+.c-discuss{background:#d1fae5;color:#065f46}
 
 /* Purchase intent badge */
 .intent-badge{display:inline-block;padding:4px 14px;border-radius:20px;font-size:13px;font-weight:700;margin:8px 0}
@@ -171,6 +168,9 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
     <button class="nav-btn" id="nav-3" onclick="switchPanel(3)">
         <span>3</span> 数据更新入口
     </button>
+    <button class="nav-btn" id="nav-4" onclick="switchPanel(4)">
+        <span>4</span> 批量评论洞察
+    </button>
     <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0">
         <button class="nav-btn" onclick="openSettingsModal()" style="color:#64748b">
             <span>⚙️</span> API 设置
@@ -182,7 +182,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <main class="main-content">
 
 <div class="panel-header">
-    <h1>📊 达人账号分析系统 v3.0</h1>
+    <h1>📊 达人账号分析系统 v4.0</h1>
     <p class="subtitle" id="page-subtitle">输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向</p>
 </div>
 
@@ -319,6 +319,53 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
     <div id="views-results-area" class="hidden"></div>
 </div>
 
+<!-- Panel 4: Batch Comment Insights (v4.1 — 视频链接分组对比) -->
+<div id="panel-4" class="panel hidden">
+    <div class="input-panel">
+        <h2 style="margin-bottom:12px">批量评论洞察</h2>
+        <p style="font-size:13px;color:#64748b;margin-bottom:16px">粘贴垂类达人 + 生活种草达人的视频链接��分别统计评论分类分布，LLM 生成对比洞察。</p>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div>
+                <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <span style="width:8px;height:8px;border-radius:2px;background:#7F77DD;display:inline-block;"></span>
+                    <strong>垂类达人</strong>
+                    <span style="font-weight:400;color:#64748b;font-size:11px">视频链接</span>
+                </label>
+                <textarea id="bc-vertical-links" placeholder="每行一条视频链接&#10;https://www.instagram.com/p/xxx&#10;https://www.tiktok.com/@xxx/video/xxx" rows="4" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+            </div>
+            <div>
+                <label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <span style="width:8px;height:8px;border-radius:2px;background:#D4537E;display:inline-block;"></span>
+                    <strong>生活种草达人</strong>
+                    <span style="font-weight:400;color:#64748b;font-size:11px">视频链接</span>
+                </label>
+                <textarea id="bc-lifestyle-links" placeholder="每行一条视频链接&#10;https://www.instagram.com/p/xxx&#10;https://www.tiktok.com/@xxx/video/xxx" rows="4" style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+            </div>
+        </div>
+
+        <div class="input-row">
+            <div class="input-group">
+                <label>平台</label>
+                <select id="bc-platform"><option value="Instagram">Instagram</option><option value="TikTok">TikTok</option></select>
+            </div>
+            <div class="input-group">
+                <label>每视频抓取评论数</label>
+                <select id="bc-count">
+                    <option value="10">10 条</option><option value="20" selected>20 条</option><option value="50">50 条</option><option value="100">100 条</option>
+                </select>
+            </div>
+            <button class="btn" id="batch-comments-btn" onclick="batchCommentInsight()" style="margin-bottom:0">开始分析</button>
+        </div>
+        <div class="status" id="bc-status"></div>
+        <div id="bc-progress" class="hidden" style="margin-top:12px">
+            <div class="progress-bar"><div class="progress-fill" id="bc-progress-fill" style="width:0%"></div></div>
+            <p class="text-sm" id="bc-progress-text"></p>
+        </div>
+    </div>
+    <div id="bc-results-area" class="hidden"></div>
+</div>
+
 </main>
 </div>
 
@@ -369,12 +416,9 @@ const CAT_COLORS = {
 };
 
 const COMMENT_CAT_INFO = {
-    "purchase_inquiry": ["产品咨询","c-inquiry","#FF6B6B"],
+    "content_engagement": ["内容互动","c-engagement","#4D96FF"],
     "purchase_intent": ["购买意向","c-intent","#FFD93D"],
-    "product_discussion": ["产品讨论","c-discuss","#6BCB77"],
-    "positive_feedback": ["正向反馈","c-positive","#4D96FF"],
-    "negative_feedback": ["负向反馈","c-negative","#E74C3C"],
-    "social_engagement": ["社交互动","c-social","#9B59B6"],
+    "product_interaction": ["产品互动","c-discuss","#6BCB77"],
     "other": ["其他","","#95A5A6"]
 };
 
@@ -699,8 +743,9 @@ function renderCommentPart(partData, partNum, title, subtitle) {
             html += `<p class="text-sm mb-12">📝 ${v.classified_comments.length} 条分类评论 (共抓取 ${v.total_raw_comments} 条)</p>`;
             v.classified_comments.forEach(c => {
                 const [catName, catCls] = COMMENT_CAT_INFO[c.category_key] || [c.category,''];
+                const subLabel = c.subtype_zh ? ` [${c.subtype_zh}]` : '';
                 html += `<div class="comment-item">
-                    <span class="comment-cat ${catCls}">${catName}</span>
+                    <span class="comment-cat ${catCls}">${catName}${subLabel}</span>
                     👍 ${c.likes} @${escHtml(c.username||'匿名')} — ${escHtml((c.text||'').substring(0,120))}
                 </div>`;
             });
@@ -1066,7 +1111,8 @@ function switchPanel(num) {
     const subtitles = {
         1: '输入任意达人ID → 选题分布 + 双维度评论分析 → 定位细分赛道 + 评估购买意向',
         2: '输入任意 TikTok / Instagram 视频链接 → 口播全文 + HOOK/中段/CTA 拆解 + 全部评论',
-        3: '上传包含视频链接的 Excel → 批量返回最新 View 数据'
+        3: '上传包含视频链接的 Excel → 批量返回最新 View 数据',
+        4: '输入多个达人 → 并行抓取评论 → 跨达人购买意向对比 + 评论分布'
     };
     document.getElementById('page-subtitle').textContent = subtitles[num];
 }
@@ -1560,6 +1606,179 @@ function renderError(containerId, message, serviceName) {
         default:
             container.innerHTML = `<span class="error">${escHtml(msgStr.substring(0, 300))}</span>`;
     }
+}
+
+// ============ Panel 4: Batch Comment Insights (v4.1 — 视频链接分组) ============
+let bcAbortController = null;
+
+function parseLinks(text) {
+    if (!text || !text.trim()) return [];
+    return text.trim().split(/[\n,]+/).map(s => s.trim()).filter(s => s.length > 5);
+}
+
+async function batchCommentInsight() {
+    const verticalLinks = parseLinks(document.getElementById('bc-vertical-links').value);
+    const lifestyleLinks = parseLinks(document.getElementById('bc-lifestyle-links').value);
+    const platform = document.getElementById('bc-platform').value;
+    const commentCount = parseInt(document.getElementById('bc-count').value);
+    const status = document.getElementById('bc-status');
+    const btn = document.getElementById('batch-comments-btn');
+    const progressBar = document.getElementById('bc-progress');
+    const progressFill = document.getElementById('bc-progress-fill');
+    const progressText = document.getElementById('bc-progress-text');
+    const resultsArea = document.getElementById('bc-results-area');
+
+    if (!verticalLinks.length && !lifestyleLinks.length) {
+        status.innerHTML = '<span class="error">请至少输入一条视频链接</span>'; return;
+    }
+
+    bcAbortController = new AbortController();
+    btn.disabled = true;
+    progressBar.classList.remove('hidden');
+    resultsArea.classList.add('hidden');
+    const totalLinks = verticalLinks.length + lifestyleLinks.length;
+    status.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在并行抓取评论...';
+    progressText.textContent = `共 ${totalLinks} 条视频链接`;
+    progressFill.style.width = '10%';
+
+    try {
+        const resp = await fetch('/api/batch/comments', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({vertical_links: verticalLinks, lifestyle_links: lifestyleLinks, platform, comment_count: commentCount}),
+            signal: bcAbortController.signal
+        });
+
+        progressFill.style.width = '80%';
+        progressText.textContent = '正在汇总结果...';
+
+        const data = await resp.json();
+        if (data.error) { renderError('bc-status', data.error, 'API'); btn.disabled = false; return; }
+
+        progressFill.style.width = '100%';
+        const vTotal = (data.vertical && data.vertical.total_comments) || 0;
+        const lTotal = (data.lifestyle && data.lifestyle.total_comments) || 0;
+        progressText.textContent = `完成：垂类 ${vTotal} 条 + 生活种草 ${lTotal} 条评论`;
+        status.innerHTML = '<span class="ok">分析完成</span>';
+
+        renderBatchCommentResults(data);
+        resultsArea.classList.remove('hidden');
+    } catch(e) {
+        if (e.name === 'AbortError') {
+            status.innerHTML = '<span class="ok">已停止</span>';
+        } else {
+            renderError('bc-status', e.message, 'API');
+        }
+    } finally {
+        btn.disabled = false;
+        progressBar.classList.add('hidden');
+        bcAbortController = null;
+    }
+}
+
+function renderBatchCommentResults(data) {
+    const container = document.getElementById('bc-results-area');
+    const v = data.vertical;
+    const l = data.lifestyle;
+    let html = '';
+
+    if (v || l) {
+        html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
+        html += v ? renderGroupCard(v, '垂类达人', '#7F77DD') : renderEmptyCard('垂类达人', '#7F77DD');
+        html += l ? renderGroupCard(l, '生活种草达人', '#D4537E') : renderEmptyCard('生活种草达人', '#D4537E');
+        html += '</div>';
+    }
+
+    // LLM insights
+    if (data.insights && data.insights.text) {
+        html += `<div class="section" style="margin-top:16px">
+            <h2 style="display:flex;align-items:center;gap:8px">
+                AI 洞察
+                <span style="font-size:11px;color:#7F77DD;background:#EEEDFE;padding:2px 8px;border-radius:4px">LLM</span>
+            </h2>
+            <div style="font-size:13px;color:#475569;line-height:1.8;white-space:pre-wrap">${escHtml(data.insights.text)}</div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function renderGroupCard(group, label, accentColor) {
+    const dist = group.distribution || {};
+    const total = group.total_comments || 0;
+    const videos = group.total_videos || 0;
+
+    if (total === 0) {
+        return `<div class="section">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px">
+                <span style="width:8px;height:8px;border-radius:2px;background:${accentColor};display:inline-block;"></span>
+                <strong>${label}</strong>
+                <span style="font-size:12px;color:#64748b">${videos} 条视频</span>
+            </div>
+            <p style="color:#94a3b8;font-size:13px">暂无评论数据</p>
+        </div>`;
+    }
+
+    // Calculate arc params for donut
+    const categories = [
+        {key:'content_engagement', color:'#7F77DD', label:'内容互动'},
+        {key:'purchase_intent', color:'#D4537E', label:'购买意向'},
+        {key:'product_interaction', color:'#1D9E75', label:'产品互动'},
+        {key:'other', color:'#B4B2A9', label:'其他'}
+    ];
+    const circumference = 201.06;
+    let arcPaths = '';
+    let offset = 0;
+    categories.forEach(c => {
+        const cnt = (dist[c.key] && dist[c.key].count) || 0;
+        const pct = total > 0 ? cnt / total : 0;
+        const dashLen = pct * circumference;
+        arcPaths += `<circle cx="40" cy="40" r="32" fill="none" stroke="${c.color}" stroke-width="10" stroke-dasharray="${dashLen.toFixed(1)} ${(circumference - dashLen).toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}" transform="rotate(-90 40 40)" stroke-linecap="round"/>`;
+        offset += dashLen;
+    });
+
+    let rowsHtml = '';
+    categories.forEach(c => {
+        const cnt = (dist[c.key] && dist[c.key].count) || 0;
+        const pct = (dist[c.key] && dist[c.key].pct) || 0;
+        rowsHtml += `<div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px">
+            <span style="width:8px;height:8px;border-radius:2px;background:${c.color};display:inline-block;flex-shrink:0;"></span>
+            <span style="flex:1">${c.label}</span>
+            <span style="font-weight:500">${cnt}</span>
+            <span style="color:#94a3b8">${pct}%</span>
+        </div>`;
+    });
+
+    const score = group.purchase_intent_score || 0;
+    const labelCls = (group.purchase_intent_label || '').includes('高') ? 'intent-high' : (group.purchase_intent_label || '').includes('中') ? 'intent-medium' : 'intent-low';
+
+    return `<div class="section">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+            <span style="width:8px;height:8px;border-radius:2px;background:${accentColor};display:inline-block;"></span>
+            <strong>${label}</strong>
+            <span style="font-size:12px;color:#64748b">${videos} 条视频 &middot; ${total} 条评论</span>
+            <span class="intent-badge ${labelCls}" style="margin-left:auto">${group.purchase_intent_label || '低购买意向'}</span>
+        </div>
+        <div style="display:flex;gap:14px;align-items:center;">
+            <svg width="80" height="80" viewBox="0 0 80 80">
+                <circle cx="40" cy="40" r="32" fill="none" stroke="#e2e8f0" stroke-width="10"/>
+                ${arcPaths}
+                <text x="40" y="37" text-anchor="middle" font-size="16" font-weight="500" fill="#1e293b">${total}</text>
+                <text x="40" y="51" text-anchor="middle" font-size="10" fill="#94a3b8">条评论</text>
+            </svg>
+            <div style="flex:1">${rowsHtml}</div>
+        </div>
+    </div>`;
+}
+
+function renderEmptyCard(label, accentColor) {
+    return `<div class="section">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+            <span style="width:8px;height:8px;border-radius:2px;background:${accentColor};display:inline-block;"></span>
+            <strong>${label}</strong>
+        </div>
+        <p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0">未输入链接</p>
+    </div>`;
 }
 
 // ============ Init ============
