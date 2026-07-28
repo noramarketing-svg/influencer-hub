@@ -935,6 +935,13 @@ async function batchAnalyze() {
 
         if (batchAbortController.signal.aborted) return;
 
+        const checkCT = checkResp.headers.get('content-type') || '';
+        if (!checkCT.includes('application/json')) {
+            const text = await checkResp.text();
+            console.error('Step 1 non-JSON:', text.slice(0, 300));
+            throw new Error(`服务器返回非 JSON (${checkResp.status})，请刷新重试`);
+        }
+
         const checkData = await checkResp.json();
 
         const cachedUsers = checkData.cached || [];
@@ -944,22 +951,25 @@ async function batchAnalyze() {
         progressText.textContent = `${cachedUsers.length} 个有缓存，${needApifyUsers.length} 个需抓取`;
         progressFill.style.width = '30%';
 
-        // Step 2: Fetch missing ones via Apify (逐个抓取，避免 Render 超时)
+        // Step 2: Fetch missing ones via Apify (异步任务 + 轮询，彻底绕过 Render 30s 超时)
         if (needApifyUsers.length > 0) {
-            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在逐个抓取 ${needApifyUsers.length} 个达人...`;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在启动 ${needApifyUsers.length} 个异步抓取任务...`;
 
+            // 2a: 启动所有异步任务
+            const tasks = [];
             for (let i = 0; i < needApifyUsers.length; i++) {
                 if (batchAbortController.signal.aborted) return;
                 const u = needApifyUsers[i];
-                progressText.textContent = `正在抓取: ${u.username} (${i + 1}/${needApifyUsers.length})...`;
-                progressFill.style.width = `${30 + Math.floor((i / needApifyUsers.length) * 50)}%`;
+                progressText.textContent = `启动任务: ${u.username} (${i + 1}/${needApifyUsers.length})...`;
+                progressFill.style.width = `${30 + Math.floor((i / needApifyUsers.length) * 10)}%`;
 
                 try {
-                    const fetchResp = await fetch('/api/batch/fetch', {
+                    const startResp = await fetch('/api/apify/fetch', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
-                            usernames: [u.username],
+                            input: u.username,
+                            username: u.username,
                             platform, days, language
                         }),
                         signal: batchAbortController.signal
@@ -967,29 +977,79 @@ async function batchAnalyze() {
 
                     if (batchAbortController.signal.aborted) return;
 
-                    const contentType = fetchResp.headers.get('content-type') || '';
-                    if (!contentType.includes('application/json')) {
-                        const text = await fetchResp.text();
-                        console.error('Non-JSON response:', text.slice(0, 200));
-                        throw new Error(`服务器返回非 JSON (${fetchResp.status})，可能超时`);
+                    const startCT = startResp.headers.get('content-type') || '';
+                    if (!startCT.includes('application/json')) {
+                        const text = await startResp.text();
+                        console.error(`Start task non-JSON for ${u.username}:`, text.slice(0, 200));
+                        throw new Error(`启动任务失败: 服务器返回非 JSON (${startResp.status})`);
                     }
 
-                    const fetchData = await fetchResp.json();
-                    if (fetchData.error) {
-                        throw new Error(fetchData.error);
+                    const startData = await startResp.json();
+                    if (startData.error) {
+                        throw new Error(startData.error);
                     }
-                    for (const r of (fetchData.results || [])) {
-                        if (r.videos && r.videos.length) {
-                            allVideos.push(...r.videos);
-                        }
-                    }
-                } catch (fetchErr) {
-                    console.error(`Fetch failed for ${u.username}:`, fetchErr);
-                    status.innerHTML = `<span class="error">${u.username} 抓取失败: ${fetchErr.message}</span>`;
-                    // 继续下一个，不中断
+                    tasks.push({ username: u.username, taskId: startData.task_id });
+                } catch (err) {
+                    console.error(`Start task failed for ${u.username}:`, err);
+                    status.innerHTML = `<span class="error">${u.username} 任务启动失败: ${err.message}</span>`;
                 }
             }
-            progressText.textContent = `抓取完成，共 ${allVideos.length} 条视频`;
+
+            // 2b: 轮询所有任务状态
+            if (tasks.length > 0) {
+                const pending = new Set(tasks.map(t => t.taskId));
+                const maxWait = 180000; // 180秒总超时
+                const pollInterval = 4000; // 4秒轮询间隔
+                const startTime = Date.now();
+                let pollRound = 0;
+
+                status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在后台抓取 ${tasks.length} 个达人，请稍候...`;
+
+                while (pending.size > 0 && (Date.now() - startTime) < maxWait) {
+                    if (batchAbortController.signal.aborted) return;
+                    pollRound++;
+                    await new Promise(r => setTimeout(r, pollInterval));
+
+                    for (const task of tasks) {
+                        if (!pending.has(task.taskId)) continue;
+                        if (batchAbortController.signal.aborted) return;
+
+                        try {
+                            const statusResp = await fetch(`/api/apify/status/${task.taskId}`, {
+                                signal: batchAbortController.signal
+                            });
+
+                            const statusCT = statusResp.headers.get('content-type') || '';
+                            if (!statusCT.includes('application/json')) {
+                                console.error(`Status poll non-JSON for ${task.username}:`, await statusResp.text().slice(0, 200));
+                                continue; // 继续轮询，不删除 pending
+                            }
+
+                            const statusData = await statusResp.json();
+                            if (statusData.status === 'done') {
+                                pending.delete(task.taskId);
+                                const vids = (statusData.result && statusData.result.videos) || [];
+                                allVideos.push(...vids);
+                                console.log(`${task.username} done: ${vids.length} videos`);
+                            } else if (statusData.status === 'error') {
+                                pending.delete(task.taskId);
+                                console.error(`${task.username} error:`, statusData.error);
+                                status.innerHTML = `<span class="error">${task.username} 抓取失败: ${statusData.error}</span>`;
+                            } else {
+                                // running / started — 继续轮询
+                                progressText.textContent = `后台抓取中: ${task.username} (第${pollRound}轮, 剩余${pending.size}个)...`;
+                            }
+                        } catch (pollErr) {
+                            console.error(`Poll error for ${task.taskId}:`, pollErr);
+                        }
+                    }
+                }
+
+                if (pending.size > 0) {
+                    status.innerHTML = `<span class="error">${pending.size} 个任务超时未完成，但已获得 ${allVideos.length} 条视频</span>`;
+                }
+                progressText.textContent = `抓取完成，共 ${allVideos.length} 条视频`;
+            }
         }
 
         // Step 3: Load cached videos for already-cached users
@@ -998,13 +1058,22 @@ async function batchAnalyze() {
             let cachedVideos = [];
             for (const cu of cachedUsers) {
                 if (batchAbortController.signal.aborted) return;
-                const resp = await fetch('/api/analyze', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({input: cu.username, platform, days, language})
-                });
-                const data = await resp.json();
-                if (data.videos) cachedVideos.push(...data.videos);
+                try {
+                    const resp = await fetch('/api/analyze', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({input: cu.username, platform, days, language})
+                    });
+                    const respCT = resp.headers.get('content-type') || '';
+                    if (!respCT.includes('application/json')) {
+                        console.error(`Analyze non-JSON for ${cu.username}:`, await resp.text().slice(0, 200));
+                        continue;
+                    }
+                    const data = await resp.json();
+                    if (data.videos) cachedVideos.push(...data.videos);
+                } catch (err) {
+                    console.error(`Load cached failed for ${cu.username}:`, err);
+                }
             }
             // 合并到 allVideos 中（去重）
             const existingLinks = new Set(allVideos.map(v => v.视频链接 || v.url || ''));
