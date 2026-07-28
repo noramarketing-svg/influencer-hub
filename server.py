@@ -1013,9 +1013,9 @@ def api_batch_fetch():
                 cached_videos = load_cached_videos(username, platform)
                 
                 if platform.lower() == "instagram":
-                    new_videos = fetch_instagram_videos(username, days)
+                    new_videos = fetch_instagram_videos(username, APIFY_API_KEY, days)
                 else:
-                    new_videos = fetch_tiktok_videos(username, days)
+                    new_videos = fetch_tiktok_videos(username, APIFY_API_KEY, days)
                 
                 merged = merge_videos(cached_videos, new_videos)
                 save_cached_videos(username, platform, merged)
@@ -1076,9 +1076,9 @@ def _apify_fetch_task(task_id, username, platform, days, language):
         cached = load_cached_videos(username, platform)
         
         if platform.lower() == "instagram":
-            new_videos = fetch_instagram_videos(username, days)
+            new_videos = fetch_instagram_videos(username, APIFY_API_KEY, days)
         else:
-            new_videos = fetch_tiktok_videos(username, days)
+            new_videos = fetch_tiktok_videos(username, APIFY_API_KEY, days)
         
         merged = merge_videos(cached, new_videos)
         save_cached_videos(username, platform, merged)
@@ -1510,12 +1510,18 @@ def api_config_keys():
 @app.route("/api/config/credits")
 def api_config_credits():
     """查询各 API 额度"""
-    sc = _check_sc_credits()
-    ap = _check_apify_credits()
-    return jsonify({
-        "scrapecreators": sc,
-        "apify": ap,
-    })
+    try:
+        sc = _check_sc_credits()
+    except Exception as e:
+        sc = {"keys": [], "active": 0, "error": str(e)[:100]}
+    try:
+        ap = _check_apify_credits()
+    except Exception as e:
+        ap = {"remaining": 0, "error": str(e)[:100]}
+    try:
+        return jsonify({"scrapecreators": sc, "apify": ap})
+    except Exception:
+        return jsonify({"scrapecreators": {"keys": [], "active": 0}, "apify": None})
 
 
 @app.route("/api/config/scrapecreators-key", methods=["POST"])
