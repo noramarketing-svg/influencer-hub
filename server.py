@@ -655,20 +655,31 @@ def _check_apify_credits():
         r = requests.get("https://api.apify.com/v2/users/me",
                          headers={"Authorization": f"Bearer {APIFY_API_KEY}"}, timeout=10)
         if r.status_code == 200:
-            uid = r.json().get("data", {}).get("id")
+            try:
+                data = r.json()
+                uid = data.get("data", {}).get("id")
+            except Exception:
+                return {"remaining": "?", "error": "Apify response not JSON", "raw_status": r.status_code}
             if uid:
                 r2 = requests.get(f"https://api.apify.com/v2/users/{uid}/usage/monthly",
                                   headers={"Authorization": f"Bearer {APIFY_API_KEY}"}, timeout=10)
                 if r2.status_code == 200:
-                    u = r2.json().get("data", {})
+                    try:
+                        u = r2.json().get("data", {})
+                    except Exception:
+                        return {"remaining": "?", "error": "Apify usage response not JSON"}
                     used = u.get("totalUsageCreditsUsdAfterVolumeDiscount", 0)
-                    # Apify 免费额度 $5/月
                     free_tier = 5.0
                     remaining = max(0, free_tier - used)
                     return {"remaining": round(remaining, 2), "used": round(used, 2), "total": free_tier}
-    except Exception:
-        pass
-    return None
+                else:
+                    return {"remaining": "?", "error": f"Apify usage HTTP {r2.status_code}"}
+            else:
+                return {"remaining": "?", "error": "No uid in Apify response"}
+        else:
+            return {"remaining": "?", "error": f"Apify HTTP {r.status_code}"}
+    except Exception as e:
+        return {"remaining": "?", "error": str(e)[:80]}
 
 
 def _fetch_video_metadata_sc(url, platform):

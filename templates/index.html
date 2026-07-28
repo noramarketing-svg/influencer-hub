@@ -973,9 +973,9 @@ async function batchAnalyze() {
         }
 
         // Step 3: Load cached videos for already-cached users
-        if (cachedUsers.length > 0 && needApifyUsers.length === 0) {
-            // All cached — load from cache
-            allVideos = [];
+        // 无论是否有 need_apify 用户，缓存用户的数据都要加载
+        if (cachedUsers.length > 0) {
+            let cachedVideos = [];
             for (const cu of cachedUsers) {
                 if (batchAbortController.signal.aborted) return;
                 const resp = await fetch('/api/analyze', {
@@ -984,7 +984,17 @@ async function batchAnalyze() {
                     body: JSON.stringify({input: cu.username, platform, days, language})
                 });
                 const data = await resp.json();
-                if (data.videos) allVideos.push(...data.videos);
+                if (data.videos) cachedVideos.push(...data.videos);
+            }
+            // 合并到 allVideos 中（去重）
+            if (!allVideos) allVideos = [];
+            const existingLinks = new Set(allVideos.map(v => v.视频链接 || v.url || ''));
+            for (const v of cachedVideos) {
+                const link = v.视频链接 || v.url || '';
+                if (!existingLinks.has(link)) {
+                    allVideos.push(v);
+                    existingLinks.add(link);
+                }
             }
         }
 
