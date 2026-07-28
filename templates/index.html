@@ -923,6 +923,8 @@ async function batchAnalyze() {
     stopBtn.disabled = false;
 
     try {
+        let allVideos = [];
+
         // Step 1: Check cache for all
         const checkResp = await fetch('/api/batch/analyze', {
             method: 'POST',
@@ -942,34 +944,52 @@ async function batchAnalyze() {
         progressText.textContent = `${cachedUsers.length} 个有缓存，${needApifyUsers.length} 个需抓取`;
         progressFill.style.width = '30%';
 
-        // Step 2: Fetch missing ones via Apify
+        // Step 2: Fetch missing ones via Apify (逐个抓取，避免 Render 超时)
         if (needApifyUsers.length > 0) {
-            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在抓取 ${needApifyUsers.length} 个达人...`;
-            progressText.textContent = `正在 Apify 抓取中... (0/${needApifyUsers.length})`;
+            status.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 正在逐个抓取 ${needApifyUsers.length} 个达人...`;
 
-            const fetchResp = await fetch('/api/batch/fetch', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    usernames: needApifyUsers.map(u => u.username),
-                    platform, days, language
-                }),
-                signal: batchAbortController.signal
-            });
+            for (let i = 0; i < needApifyUsers.length; i++) {
+                if (batchAbortController.signal.aborted) return;
+                const u = needApifyUsers[i];
+                progressText.textContent = `正在抓取: ${u.username} (${i + 1}/${needApifyUsers.length})...`;
+                progressFill.style.width = `${30 + Math.floor((i / needApifyUsers.length) * 50)}%`;
 
-            if (batchAbortController.signal.aborted) return;
+                try {
+                    const fetchResp = await fetch('/api/batch/fetch', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            usernames: [u.username],
+                            platform, days, language
+                        }),
+                        signal: batchAbortController.signal
+                    });
 
-            const fetchData = await fetchResp.json();
-            progressFill.style.width = '80%';
-            progressText.textContent = `抓取完成: ${fetchData.total_done} 成功, ${fetchData.total_error} 失败`;
+                    if (batchAbortController.signal.aborted) return;
 
-            // Merge cached results
-            allVideos = [];
-            for (const r of fetchData.results) {
-                if (r.videos && r.videos.length) {
-                    allVideos.push(...r.videos);
+                    const contentType = fetchResp.headers.get('content-type') || '';
+                    if (!contentType.includes('application/json')) {
+                        const text = await fetchResp.text();
+                        console.error('Non-JSON response:', text.slice(0, 200));
+                        throw new Error(`服务器返回非 JSON (${fetchResp.status})，可能超时`);
+                    }
+
+                    const fetchData = await fetchResp.json();
+                    if (fetchData.error) {
+                        throw new Error(fetchData.error);
+                    }
+                    for (const r of (fetchData.results || [])) {
+                        if (r.videos && r.videos.length) {
+                            allVideos.push(...r.videos);
+                        }
+                    }
+                } catch (fetchErr) {
+                    console.error(`Fetch failed for ${u.username}:`, fetchErr);
+                    status.innerHTML = `<span class="error">${u.username} 抓取失败: ${fetchErr.message}</span>`;
+                    // 继续下一个，不中断
                 }
             }
+            progressText.textContent = `抓取完成，共 ${allVideos.length} 条视频`;
         }
 
         // Step 3: Load cached videos for already-cached users
@@ -987,7 +1007,6 @@ async function batchAnalyze() {
                 if (data.videos) cachedVideos.push(...data.videos);
             }
             // 合并到 allVideos 中（去重）
-            if (!allVideos) allVideos = [];
             const existingLinks = new Set(allVideos.map(v => v.视频链接 || v.url || ''));
             for (const v of cachedVideos) {
                 const link = v.视频链接 || v.url || '';
