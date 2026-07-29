@@ -642,15 +642,42 @@ def _check_sc_credits():
                              headers={"x-api-key": key}, timeout=10)
             if r.status_code == 402:
                 keys_status.append({"index": i, "masked": _mask_key(key), "status": "exhausted"})
-            elif r.status_code in (200, 404):
+            elif r.status_code in (200, 400, 404, 422):
                 keys_status.append({"index": i, "masked": _mask_key(key), "status": "active"})
                 if i == _sc_key_index % len(SC_API_KEYS):
                     active_idx = i
+            elif r.status_code in (401, 403):
+                keys_status.append({"index": i, "masked": _mask_key(key), "status": "invalid"})
+            elif r.status_code == 429:
+                keys_status.append({"index": i, "masked": _mask_key(key), "status": "limited"})
             else:
                 keys_status.append({"index": i, "masked": _mask_key(key), "status": f"error_{r.status_code}"})
         except Exception as e:
             keys_status.append({"index": i, "masked": _mask_key(key), "status": f"error: {str(e)[:30]}"})
     return {"keys": keys_status, "active": active_idx, "total": len(SC_API_KEYS)}
+
+
+def _check_deepseek_status():
+    """DeepSeek 不提供通用余额查询；用模型列表接口判断 Key 是否可用。"""
+    if not DEEPSEEK_API_KEY:
+        return {"status": "missing"}
+    try:
+        r = requests.get(
+            "https://api.deepseek.com/models",
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            return {"status": "active"}
+        if r.status_code == 402:
+            return {"status": "exhausted"}
+        if r.status_code in (401, 403):
+            return {"status": "invalid"}
+        if r.status_code == 429:
+            return {"status": "limited"}
+        return {"status": "unavailable", "http_status": r.status_code}
+    except Exception as e:
+        return {"status": "unavailable", "error": str(e)[:100]}
 
 def _check_apify_credits():
     """查询 Apify 剩余额度"""
@@ -1667,9 +1694,13 @@ def api_config_credits():
     except Exception as e:
         ap = {"remaining": 0, "error": str(e)[:100]}
     try:
-        return jsonify({"scrapecreators": sc, "apify": ap})
+        ds = _check_deepseek_status()
+    except Exception as e:
+        ds = {"status": "unavailable", "error": str(e)[:100]}
+    try:
+        return jsonify({"scrapecreators": sc, "apify": ap, "deepseek": ds})
     except Exception:
-        return jsonify({"scrapecreators": {"keys": [], "active": 0}, "apify": None})
+        return jsonify({"scrapecreators": {"keys": [], "active": 0}, "apify": None, "deepseek": {"status": "unavailable"}})
 
 
 @app.route("/api/config/scrapecreators-key", methods=["POST"])
@@ -1892,7 +1923,7 @@ def api_batch_comments():
 COMMENT_CAT_ORDER = ["content_engagement", "purchase_intent", "product_interaction", "other"]
 COMMENT_CAT_NAMES = {
     "content_engagement": "内容互动",
-    "purchase_intent": "购买意���",
+    "purchase_intent": "购买意向",
     "product_interaction": "产品互动",
     "other": "其他",
 }
@@ -2113,6 +2144,7 @@ def api_calibrate_batch():
             text = corr.get("text", "").strip()
             old_cat = corr.get("old_category", "other")
             new_cat = corr.get("new_category", "purchase_intent")
+            reason = corr.get("reason", "").strip()
 
             if not text:
                 results.append({"index": idx, "success": False, "error": "评论原文为空"})
@@ -2123,6 +2155,8 @@ def api_calibrate_batch():
 
             config = load_config()
             diagnosis_lines, matched_exclude = _cal_diagnose(text, old_cat, new_cat, config)
+            if reason:
+                diagnosis_lines.insert(0, f"人工修正理由：{reason}")
             fix_items, keyword = _cal_apply_fix(text, new_cat, matched_exclude, config)
 
             if not fix_items:

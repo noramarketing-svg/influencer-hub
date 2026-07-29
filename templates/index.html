@@ -173,10 +173,10 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
         <span>2</span> 单视频分析
     </button>
     <button class="nav-btn" id="nav-3" onclick="switchPanel(3)">
-        <span>3</span> 数据更新入口
+        <span>3</span> 数据更新
     </button>
     <button class="nav-btn" id="nav-4" onclick="switchPanel(4)">
-        <span>4</span> 批量评论洞察
+        <span>4</span> 评论洞察
     </button>
     <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0">
         <button class="nav-btn" onclick="openSettingsModal()" style="color:#64748b">
@@ -379,6 +379,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
                 </select>
             </div>
             <button class="btn" id="batch-comments-btn" onclick="batchCommentInsight()" style="margin-bottom:0">开始分析</button>
+            <button class="btn btn-secondary hidden" id="batch-comments-stop-btn" onclick="stopBatchCommentInsight()" style="margin-bottom:0">⏹ 停止</button>
         </div>
         <div class="status" id="bc-status"></div>
         <div id="bc-progress" class="hidden" style="margin-top:12px">
@@ -413,7 +414,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
         <div class="input-group">
             <label>DeepSeek API Key <span id="deepseek-status" class="key-status missing">未设置</span></label>
             <input type="text" id="deepseek-key-input" placeholder="粘贴 DeepSeek API Key">
-            <div class="hint">用于 AI 内容拆解</div>
+            <div class="hint">用于 AI 内容拆解 | <span id="deepseek-credits" style="color:#4472C4"></span></div>
         </div>
 
         <div class="modal-actions">
@@ -476,7 +477,7 @@ async function analyzeInfluencer() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({input, platform, days, language})
         });
-        const data = await resp.json();
+        const data = await readJsonResponse(resp);
         if (data.error) { status.innerHTML = `<span class="error">${data.error}</span>`; btn.disabled = false; return; }
 
         allVideos = data.videos || [];
@@ -704,7 +705,7 @@ async function fetchCommentAnalysis() {
             progressText.textContent = `正在抓取评论... (${Math.round(progress)}%)`;
         }, 400);
 
-        const data = await resp.json();
+        const data = await readJsonResponse(resp);
         clearInterval(progressInterval);
 
         if (commentAbortController.signal.aborted) return;
@@ -714,7 +715,7 @@ async function fetchCommentAnalysis() {
         stopBtn.classList.add('hidden');
 
         if (data.error) {
-            loadingEl.innerHTML = `<div class="error-box">评论抓取失败: ${data.error}</div>`;
+            loadingEl.innerHTML = `<div class="error-box">评论抓取失败：${escHtml(friendlyApiError(data.error, resp.status))}</div>`;
             return;
         }
 
@@ -731,7 +732,7 @@ async function fetchCommentAnalysis() {
             stopBtn.classList.add('hidden');
             return;
         }
-        loadingEl.innerHTML = `<div class="error-box">请求失败: ${e.message}</div>`;
+        loadingEl.innerHTML = `<div class="error-box">评论抓取失败：${escHtml(friendlyApiError(e.message))}</div>`;
     }
 }
 
@@ -1291,6 +1292,29 @@ function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function friendlyApiError(message, status) {
+    const raw = String(message || '').toLowerCase();
+    if (status === 402 || /credit|quota|insufficient|payment required|额度/.test(raw)) return 'API 额度已用完，请在 API 设置中更换可用 Key。';
+    if (status === 401 || status === 403 || /unauthorized|forbidden|invalid.*key|authentication/.test(raw)) return 'API Key 无效或无权限，请检查 API 设置。';
+    if (status === 429 || /rate limit|too many requests/.test(raw)) return 'API 请求过于频繁，请稍后重试。';
+    if (status === 502 || status === 503 || status === 504 || /timeout|timed out|gateway/.test(raw)) return '服务暂时超时或上游接口无响应，请稍后重试。';
+    if (/private|not found|404/.test(raw)) return '视频不可访问，可能已删除、设为私密或存在地区限制。';
+    if (/unexpected end of json|non-json|empty response/.test(raw)) return '服务器未返回完整结果，可能是接口额度不足、超时或服务暂时不可用。';
+    return message ? `接口返回异常：${message}` : '接口未返回内容，请检查 API 额度后重试。';
+}
+
+async function readJsonResponse(resp) {
+    const text = await resp.text();
+    if (!text.trim()) throw new Error(friendlyApiError('empty response', resp.status));
+    try {
+        const data = JSON.parse(text);
+        if (!resp.ok && !data.error) data.error = friendlyApiError(text, resp.status);
+        return data;
+    } catch (_) {
+        throw new Error(friendlyApiError(text.substring(0, 180), resp.status));
+    }
+}
+
 // ============ Panel Navigation ============
 function switchPanel(num) {
     document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
@@ -1638,20 +1662,33 @@ async function loadCredits() {
         const credits = await resp.json();
         const sc = credits.scrapecreators;
         const ap = credits.apify;
+        const ds = credits.deepseek;
         if (sc && sc.keys) {
             const parts = sc.keys.map(k => 
-                `${k.masked}: ${k.status === 'active' ? '✅' : k.status === 'exhausted' ? '💰用完' : '❓'}`
+                `${k.masked}: ${k.status === 'active' ? '✅ 可用' :
+                    k.status === 'exhausted' ? '💰 已用完' :
+                    k.status === 'invalid' ? '❌ Key无效' :
+                    k.status === 'limited' ? '⏳ 暂时限流' : '⚠️ 暂不可用'}`
             );
-            document.getElementById('sc-credits').textContent = parts.join(' | ');
+            document.getElementById('sc-credits').textContent = parts.length ? parts.join(' | ') : '未配置';
         } else {
-            document.getElementById('sc-credits').textContent = '';
+            document.getElementById('sc-credits').textContent = '状态检查失败';
         }
         if (ap && !ap.error) {
             document.getElementById('apify-credits').textContent = 
                 `剩余 $${ap.remaining?.toFixed(2) || '?'}`;
         } else {
-            document.getElementById('apify-credits').textContent = '';
+            document.getElementById('apify-credits').textContent = ap ? '暂时无法查询' : '未配置';
         }
+        const dsLabels = {
+            active:'✅ 可用（DeepSeek 不提供精确余额）',
+            exhausted:'💰 已用完',
+            invalid:'❌ Key 无效',
+            limited:'⏳ 暂时限流',
+            missing:'未配置',
+            unavailable:'⚠️ 暂时无法检查'
+        };
+        document.getElementById('deepseek-credits').textContent = dsLabels[ds?.status] || '⚠️ 暂时无法检查';
         return {ok: true};
     } catch(e) { 
         console.error('load credits failed', e); 
@@ -1817,6 +1854,7 @@ async function batchCommentInsight() {
     const commentCount = parseInt(document.getElementById('bc-count').value);
     const status = document.getElementById('bc-status');
     const btn = document.getElementById('batch-comments-btn');
+    const stopBtn = document.getElementById('batch-comments-stop-btn');
     const progressBar = document.getElementById('bc-progress');
     const progressFill = document.getElementById('bc-progress-fill');
     const progressText = document.getElementById('bc-progress-text');
@@ -1828,6 +1866,7 @@ async function batchCommentInsight() {
 
     bcAbortController = new AbortController();
     btn.disabled = true;
+    stopBtn.classList.remove('hidden');
     bcCalQueue = [];  // 清空上次校准队列
     progressBar.classList.remove('hidden');
     resultsArea.classList.add('hidden');
@@ -1847,7 +1886,7 @@ async function batchCommentInsight() {
         progressFill.style.width = '80%';
         progressText.textContent = '正在汇总结果...';
 
-        const data = await resp.json();
+        const data = await readJsonResponse(resp);
         if (data.error) { renderError('bc-status', data.error, 'API'); btn.disabled = false; return; }
 
         progressFill.style.width = '100%';
@@ -1866,8 +1905,16 @@ async function batchCommentInsight() {
         }
     } finally {
         btn.disabled = false;
+        stopBtn.classList.add('hidden');
         progressBar.classList.add('hidden');
         bcAbortController = null;
+    }
+}
+
+function stopBatchCommentInsight() {
+    if (bcAbortController) {
+        bcAbortController.abort();
+        document.getElementById('bc-status').innerHTML = '<span class="ok">已停止评论洞察分析</span>';
     }
 }
 
@@ -1993,6 +2040,7 @@ function renderEmptyCard(label, accentColor) {
 let bcCalQueue = [];  // [{text, old_category, new_category, rowHtml}]
 
 function bcQueueCorrection(text, oldCat, newCat, rowElem) {
+    const currentReason = rowElem?.querySelector('input[placeholder*="修正理由"]')?.value.trim() || '';
     if (oldCat === newCat) {
         // 移除已存在的相同修正
         bcCalQueue = bcCalQueue.filter(q => q.text !== text);
@@ -2004,15 +2052,22 @@ function bcQueueCorrection(text, oldCat, newCat, rowElem) {
     if (existing) {
         existing.new_category = newCat;
         existing.old_category = oldCat;
+        existing.reason = currentReason;
     } else {
         bcCalQueue.push({
             text: text,
             old_category: oldCat,
             new_category: newCat,
+            reason: currentReason,
             rowElem: rowElem
         });
     }
     bcUpdateCalBar();
+}
+
+function bcUpdateReason(text, reason) {
+    const existing = bcCalQueue.find(q => q.text === text);
+    if (existing) existing.reason = reason.trim();
 }
 
 function bcUpdateCalBar() {
@@ -2052,7 +2107,8 @@ async function bcSubmitCalibration() {
             body: JSON.stringify({corrections: bcCalQueue.map(q => ({
                 text: q.text,
                 old_category: q.old_category,
-                new_category: q.new_category
+                new_category: q.new_category,
+                reason: q.reason || ''
             }))})
         });
         const data = await resp.json();
@@ -2129,6 +2185,10 @@ function renderCommentDetails(vertical, lifestyle) {
                         <option value="${catKey}" selected>${catName}</option>
                         ${Object.entries(catLabels).filter(([k]) => k !== catKey).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
                     </select>
+                    <input type="text" placeholder="修正理由（选填）"
+                        oninput="bcUpdateReason(this.dataset.text,this.value)"
+                        data-text="${escHtml(c.text).replace(/"/g, '&quot;')}"
+                        style="display:block;margin-top:4px;width:150px;font-size:11px;padding:3px 5px;border:1px solid #e2e8f0;border-radius:4px">
                 </td>
             </tr>`;
         });
