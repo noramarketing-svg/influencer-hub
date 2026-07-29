@@ -143,11 +143,24 @@ def needs_apify_refresh(username, platform, days):
     fresh_through = today.strftime("%Y-%m-%d")
     filtered = [v for v in cached if v.get("发布日期", "") >= cutoff]
 
-    if newest >= fresh_through:
-        # 只有缓存已覆盖到今天，才视为无需补抓。
-        return (False, filtered, f"✅ 缓存最新（最新视频 {newest}），共 {len(filtered)} 条")
+    # 是否抓取过与“最新视频发布日期”是两件事：达人今天可能没有发视频。
+    index = load_influencer_index()
+    account_meta = index.get(platform.lower(), {}).get(username, {})
+    last_fetch = str(account_meta.get("last_fetch", ""))
+    fetched_today = last_fetch[:10] == fresh_through
+
+    if fetched_today:
+        return (
+            False,
+            filtered,
+            f"✅ 今日已更新（抓取时间 {last_fetch}，最新视频 {newest}），共 {len(filtered)} 条",
+        )
     else:
-        return (True, filtered, f"⚠️ 缓存数据截止 {newest}，需补抓至 {fresh_through}")
+        return (
+            True,
+            filtered,
+            f"⚠️ 缓存最新视频 {newest}，上次抓取 {last_fetch or '未知'}，需补抓至 {fresh_through}",
+        )
 
 
 def filter_videos_by_days(videos, days):
