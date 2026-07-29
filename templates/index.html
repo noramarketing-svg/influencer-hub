@@ -1343,6 +1343,15 @@ async function analyzeSingleVideo() {
     const resultsArea = document.getElementById('video-results-area');
 
     if (!url) { status.innerHTML = '<span class="error">请输入视频链接</span>'; return; }
+    const cleanUrl = url.toLowerCase().split('?')[0].replace(/\/+$/, '') + '/';
+    if (cleanUrl.includes('instagram.com/') && !/instagram\.com\/(reel|p|tv)\/[^/]+\//.test(cleanUrl)) {
+        status.innerHTML = '<span class="error">这不是单条 Instagram 视频链接。请打开具体视频并复制形如 /reel/视频短码/ 的链接，不能使用达人主页或 /reels/ 列表页。</span>';
+        return;
+    }
+    if (cleanUrl.includes('tiktok.com/') && !/tiktok\.com\/@[^/]+\/video\/\d+\//.test(cleanUrl)) {
+        status.innerHTML = '<span class="error">这不是单条 TikTok 视频链接，请复制包含 /@账号/video/视频ID 的具体视频链接。</span>';
+        return;
+    }
 
     btn.disabled = true;
     resultsArea.classList.add('hidden');

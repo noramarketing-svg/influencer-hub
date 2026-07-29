@@ -845,6 +845,17 @@ def _fetch_transcript_sc(url, platform):
     return None
 
 
+def _is_single_video_url(url, platform):
+    """校验是否为单条视频，而非达人主页或 Reels 列表页。"""
+    clean = (url or "").lower().split("?")[0].rstrip("/") + "/"
+    platform_lower = (platform or "").lower()
+    if "instagram" in platform_lower:
+        return bool(re.search(r"instagram\.com/(reel|p|tv)/[^/]+/", clean))
+    if "tiktok" in platform_lower:
+        return bool(re.search(r"tiktok\.com/@[^/]+/video/\d+/", clean))
+    return False
+
+
 def _fetch_comments_single_video_sc(url, platform, target_valid=50):
     """抓取单条视频的评论，最多 target_valid 条有效评论"""
     platform_lower = (platform or "").lower()
@@ -1379,8 +1390,7 @@ def _video_analyze_task(task_id, url, detected_platform, language, comment_count
             }
         }
     except Exception as e:
-        import traceback
-        _async_tasks[task_id] = {"status": "error", "error": f"{str(e)}\n{traceback.format_exc()}"}
+        _async_tasks[task_id] = {"status": "error", "error": str(e)}
 
 
 @app.route("/api/video/analyze", methods=["POST"])
@@ -1400,6 +1410,14 @@ def api_video_analyze():
         detected_platform = platform or _detect_platform(url)
         if not detected_platform:
             return jsonify({"error": "无法识别平台，请手动选择"}), 400
+        if not _is_single_video_url(url, detected_platform):
+            if detected_platform == "Instagram":
+                return jsonify({
+                    "error": "这不是单条 Instagram 视频链接。请打开具体视频后，粘贴形如 https://www.instagram.com/reel/视频短码/ 的链接；达人主页或 /reels/ 列表页不能用于单视频分析。"
+                }), 400
+            return jsonify({
+                "error": "这不是单条 TikTok 视频链接。请粘贴包含 /@账号/video/视频ID 的具体视频链接。"
+            }), 400
         
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started"}
