@@ -138,14 +138,22 @@ def needs_apify_refresh(username, platform, days):
         return (True, cached, "缓存数据无日期，需重新抓取")
     
     newest = max(dates)
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    
-    if newest >= cutoff:
-        # 缓存覆盖了请求的天数范围
-        filtered = [v for v in cached if v.get("发布日期", "") >= cutoff]
+    today = datetime.now().date()
+    cutoff = (today - timedelta(days=max(days - 1, 0))).strftime("%Y-%m-%d")
+    fresh_through = today.strftime("%Y-%m-%d")
+    filtered = [v for v in cached if v.get("发布日期", "") >= cutoff]
+
+    if newest >= fresh_through:
+        # 只有缓存已覆盖到今天，才视为无需补抓。
         return (False, filtered, f"✅ 缓存最新（最新视频 {newest}），共 {len(filtered)} 条")
     else:
-        return (True, cached, f"⚠️ 缓存数据截止 {newest}，需补充最新视频")
+        return (True, filtered, f"⚠️ 缓存数据截止 {newest}，需补抓至 {fresh_through}")
+
+
+def filter_videos_by_days(videos, days):
+    """保留包含今天在内的近 N 个自然日数据。"""
+    cutoff = (datetime.now().date() - timedelta(days=max(int(days) - 1, 0))).strftime("%Y-%m-%d")
+    return [v for v in videos if not v.get("发布日期") or v.get("发布日期", "") >= cutoff]
 
 def load_cached_videos(username, platform):
     cache_dir = os.path.join(CACHE_DIR, platform.lower())
@@ -230,13 +238,9 @@ def api_analyze():
         if not username:
             return jsonify({"error": "无法解析达人ID"}), 400
 
-        # Select classifier
-        if language == "es":
-            es_config = load_es_config()
-            classify_fn = lambda t: classify_title_es(t, es_config)
-        else:
-            en_config = load_en_config()
-            classify_fn = lambda t: classify_title_en(t, en_config)
+        en_config = load_en_config() if language != "es" else None
+        es_config = load_es_config() if language == "es" else None
+        classify_fn = lambda t: _wrap_classify(t, language, en_config, es_config)
 
         # 增量更新判断
         need_refresh, cached, status_msg = needs_apify_refresh(username, platform, days)
@@ -268,10 +272,11 @@ def api_analyze():
             if language != "es" and unclassified_titles:
                 en_config = load_en_config()
                 llm_results = _llm_classify_titles(unclassified_titles, en_config)
-                for idx, cat in llm_results.items():
-                    if idx < len(results):
-                        results[idx]["分类"] = cat
-                        results[idx]["分类依据"] = "LLM fallback"
+                for local_idx, cat in llm_results.items():
+                    if local_idx < len(unclassified_indices):
+                        result_idx = unclassified_indices[local_idx]
+                        results[result_idx]["分类"] = cat
+                        results[result_idx]["分类依据"] = "LLM fallback"
             return jsonify({
                 "username": username, "platform": platform, "language": language,
                 "videos": results, "source": "cache", "status": status_msg
@@ -794,15 +799,40 @@ def _fetch_transcript_sc(url, platform):
 def _fetch_comments_single_video_sc(url, platform, target_valid=50):
     """抓取单条视频的评论，最多 target_valid 条有效评论"""
     platform_lower = (platform or "").lower()
+    fetch_limit = 10000 if target_valid is None else max(int(target_valid), 0)
+    if fetch_limit == 0:
+        return []
+    max_pages = 100 if target_valid is None else 15
     if "instagram" in platform_lower:
-        comments = fetch_ig_comments_sc(url, target_valid=target_valid, max_pages=15)
+        comments = fetch_ig_comments_sc(url, target_valid=fetch_limit, max_pages=max_pages)
     elif "tiktok" in platform_lower:
-        comments = fetch_tiktok_comments_sc(url, target_valid=target_valid, max_pages=15)
+        comments = fetch_tiktok_comments_sc(url, target_valid=fetch_limit, max_pages=max_pages)
     else:
         comments = []
     # 按点赞排序，保留有效评论
     valid = [c for c in comments if c.get("valid", True)]
-    return valid[:target_valid]
+    return valid if target_valid is None else valid[:fetch_limit]
+
+
+def _translate_full_text_to_chinese(text):
+    """将口播全文翻译为中文，保持段落和信息完整。"""
+    if not text:
+        return ""
+    if not DEEPSEEK_CLIENT:
+        return "（未配置 DeepSeek，无法生成中文翻译）"
+    try:
+        response = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是专业翻译。把用户提供的口播逐段完整翻译成简体中文，不总结、不删减，只输出译文。"},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=4000,
+            temperature=0.2,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"（中文翻译失败：{str(e)[:120]}）"
 
 
 def _analyze_video_with_deepseek(transcript, comments_sample, language="en"):
@@ -963,10 +993,63 @@ def _llm_classify_comments(comments, config):
 
 def _wrap_classify(title, lang, en_config, es_config):
     """分类器包装：支持 LLM 兜底"""
+    config = es_config if lang == "es" else en_config
+    normalized = re.sub(r"\s+", " ", (title or "").strip().lower())
+    override = (config or {}).get("calibration_overrides", {}).get(normalized)
+    if override:
+        return ("", "人工校准", override.get("category", "其他"),
+                "Calibration override: " + override.get("reason", ""))
     if lang == "es":
         return classify_title_es(title, es_config)
     else:
         return classify_title_en(title, en_config)
+
+
+@app.route("/api/calibrate/title", methods=["POST"])
+def api_calibrate_title():
+    """保存视频选题校准；后续分析由统一分类包装器优先应用。"""
+    try:
+        data = request.get_json() or {}
+        title = data.get("title", "").strip()
+        category = data.get("category", "").strip()
+        reason = data.get("reason", "").strip()
+        language = data.get("language", "en")
+        if not title or not category or not reason:
+            return jsonify({"error": "标题、正确分类和校准理由均不能为空"}), 400
+        if category not in CAT_COLORS:
+            return jsonify({"error": f"无效分类：{category}"}), 400
+
+        filename = "spanish_category_config.json" if language == "es" else "english_category_config.json"
+        path = os.path.join(BASE_DIR, "configs", filename)
+        with open(path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        model_rule = ""
+        if DEEPSEEK_CLIENT:
+            try:
+                prompt = (
+                    f"短视频标题应校准为“{category}”。请根据标题和人工理由，输出一句可复用分类规则。"
+                    f"\n标题：{title}\n人工理由：{reason}\n只输出规则。"
+                )
+                model_rule = DEEPSEEK_CLIENT.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=180,
+                    temperature=0.2,
+                ).choices[0].message.content.strip()
+            except Exception as e:
+                model_rule = f"模型分析暂不可用：{str(e)[:80]}"
+
+        key = re.sub(r"\s+", " ", title.lower()).strip()
+        config.setdefault("calibration_overrides", {})[key] = {
+            "category": category, "reason": reason, "model_rule": model_rule,
+            "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        return jsonify({"success": True, "category": category, "model_rule": model_rule})
+    except Exception as e:
+        return jsonify({"error": f"选题校准失败：{str(e)}"}), 500
 
 
 @app.route("/api/batch/analyze", methods=["POST"])
@@ -1030,13 +1113,14 @@ def api_batch_fetch():
                 
                 merged = merge_videos(cached_videos, new_videos)
                 save_cached_videos(username, platform, merged)
+                window_videos = filter_videos_by_days(merged, days)
                 
                 # Classify + LLM fallback
                 classified = []
                 unclassified_titles = []
                 unclassified_indices = []
                 
-                for i, v in enumerate(merged):
+                for i, v in enumerate(window_videos):
                     title = v.get("标题", v.get("title", ""))
                     brand, keywords, category, basis = _wrap_classify(title, language, en_config, es_config)
                     if category == "其他" and basis == "No rule matched":
@@ -1059,10 +1143,11 @@ def api_batch_fetch():
                 # LLM 兜底：对未命中的标题做批量分类
                 if en_config and unclassified_titles:
                     llm_results = _llm_classify_titles(unclassified_titles, en_config)
-                    for idx, cat in llm_results.items():
-                        if idx < len(classified):
-                            classified[idx]["分类"] = cat
-                            classified[idx]["分类依据"] = "LLM fallback"
+                    for local_idx, cat in llm_results.items():
+                        if local_idx < len(unclassified_indices):
+                            result_idx = unclassified_indices[local_idx]
+                            classified[result_idx]["分类"] = cat
+                            classified[result_idx]["分类依据"] = "LLM fallback"
                 
                 results.append({"username": username, "videos": classified, "error": None})
                 total_done += 1
@@ -1093,6 +1178,7 @@ def _apify_fetch_task(task_id, username, platform, days, language):
         
         merged = merge_videos(cached, new_videos)
         save_cached_videos(username, platform, merged)
+        window_videos = filter_videos_by_days(merged, days)
         
         en_config = load_en_config() if language != "es" else None
         es_config = load_es_config() if language == "es" else None
@@ -1101,7 +1187,7 @@ def _apify_fetch_task(task_id, username, platform, days, language):
         unclassified_titles = []
         unclassified_indices = []
         
-        for i, v in enumerate(merged):
+        for i, v in enumerate(window_videos):
             title = v.get("标题", v.get("title", ""))
             brand, keywords, category, basis = _wrap_classify(title, language, en_config, es_config)
             if category == "其他" and basis == "No rule matched":
@@ -1124,10 +1210,11 @@ def _apify_fetch_task(task_id, username, platform, days, language):
         # LLM 兜底
         if en_config and unclassified_titles:
             llm_results = _llm_classify_titles(unclassified_titles, en_config)
-            for idx, cat in llm_results.items():
-                if idx < len(classified):
-                    classified[idx]["分类"] = cat
-                    classified[idx]["分类依据"] = "LLM fallback"
+            for local_idx, cat in llm_results.items():
+                if local_idx < len(unclassified_indices):
+                    result_idx = unclassified_indices[local_idx]
+                    classified[result_idx]["分类"] = cat
+                    classified[result_idx]["分类依据"] = "LLM fallback"
         
         _async_tasks[task_id] = {
             "status": "done",
@@ -1179,7 +1266,7 @@ def api_apify_status(task_id):
 # API: Single video analysis (Panel 2)
 # ============================================================
 
-def _video_analyze_task(task_id, url, detected_platform, language):
+def _video_analyze_task(task_id, url, detected_platform, language, comment_count):
     """异步单条视频分析任务"""
     try:
         _async_tasks[task_id]["status"] = "running"
@@ -1191,7 +1278,9 @@ def _video_analyze_task(task_id, url, detected_platform, language):
         transcript = _fetch_transcript_sc(url, detected_platform)
         
         # Fetch comments
-        comments_raw = _fetch_comments_single_video_sc(url, detected_platform, target_valid=50)
+        comments_raw = _fetch_comments_single_video_sc(
+            url, detected_platform, target_valid=None if comment_count == "all" else int(comment_count)
+        )
         
         # Classify comments
         comment_config = load_comment_config()
@@ -1226,15 +1315,18 @@ def _video_analyze_task(task_id, url, detected_platform, language):
         # DeepSeek content analysis
         comments_sample = [{"text": c.get("text", "")} for c in comments_raw[:15]]
         analysis = _analyze_video_with_deepseek(transcript, comments_sample, language)
+        transcript_zh = _translate_full_text_to_chinese(transcript)
         
         _async_tasks[task_id] = {
             "status": "done",
             "result": {
                 "metadata": metadata,
                 "transcript": transcript or "",
+                "transcript_zh": transcript_zh,
                 "analysis": analysis,
                 "comments": classified_comments,
                 "total_comments": len(comments_raw),
+                "requested_comment_count": comment_count,
             }
         }
     except Exception as e:
@@ -1250,6 +1342,8 @@ def api_video_analyze():
         url = data.get("url", "").strip()
         platform = data.get("platform", "")
         language = data.get("language", "en")
+        raw_comment_count = data.get("comment_count", 50)
+        comment_count = "all" if str(raw_comment_count).lower() == "all" else max(0, min(int(raw_comment_count), 500))
         
         if not url:
             return jsonify({"error": "请输入视频链接"}), 400
@@ -1261,7 +1355,11 @@ def api_video_analyze():
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started"}
         
-        threading.Thread(target=_video_analyze_task, args=(task_id, url, detected_platform, language), daemon=True).start()
+        threading.Thread(
+            target=_video_analyze_task,
+            args=(task_id, url, detected_platform, language, comment_count),
+            daemon=True,
+        ).start()
         
         return jsonify({"task_id": task_id, "status": "started"})
     except Exception as e:
@@ -1281,32 +1379,64 @@ def api_video_status(task_id):
 # API: Paste Views (Panel 3)
 # ============================================================
 
-def _paste_views_task(task_id, tk_urls, ig_urls):
+def _split_pasted_column(raw):
+    """按 Excel 粘贴行原样拆分，保留中间空行。"""
+    if raw is None or raw == "":
+        return []
+    return str(raw).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _parse_view_value(value):
+    text = str(value or "").strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return max(0, int(float(text)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _max_view(live_value, historical_value):
+    values = [v for v in (live_value, historical_value) if isinstance(v, (int, float))]
+    return int(max(values)) if values else None
+
+
+def _paste_views_task(task_id, tk_urls, tk_views, ig_urls, ig_views):
     """异步批量抓取 View 数据"""
     try:
         _async_tasks[task_id]["status"] = "running"
-        tk_lines = [l.strip() for l in tk_urls.split("\n") if l.strip()] if tk_urls else []
-        ig_lines = [l.strip() for l in ig_urls.split("\n") if l.strip()] if ig_urls else []
+        tk_lines = _split_pasted_column(tk_urls)
+        tk_history = _split_pasted_column(tk_views)
+        ig_lines = _split_pasted_column(ig_urls)
+        ig_history = _split_pasted_column(ig_views)
         
-        total_rows = max(len(tk_lines), len(ig_lines))
+        total_rows = max(len(tk_lines), len(tk_history), len(ig_lines), len(ig_history))
         rows = []
         
         for i in range(total_rows):
-            row = {"row": i + 1, "tk_view": None, "ig_view": None, "tk_error": None, "ig_error": None}
+            row = {
+                "row": i + 1,
+                "tk_live_view": None, "tk_history_view": _parse_view_value(tk_history[i]) if i < len(tk_history) else None,
+                "ig_live_view": None, "ig_history_view": _parse_view_value(ig_history[i]) if i < len(ig_history) else None,
+                "tk_view": None, "ig_view": None, "tk_error": None, "ig_error": None,
+            }
             
             if i < len(tk_lines) and tk_lines[i]:
                 try:
                     meta = _fetch_video_metadata_sc(tk_lines[i], "TikTok")
-                    row["tk_view"] = meta.get("views", 0)
+                    row["tk_live_view"] = _parse_view_value(meta.get("views", 0))
                 except Exception as e:
                     row["tk_error"] = str(e)[:100]
             
             if i < len(ig_lines) and ig_lines[i]:
                 try:
                     meta = _fetch_video_metadata_sc(ig_lines[i], "Instagram")
-                    row["ig_view"] = meta.get("views", 0)
+                    row["ig_live_view"] = _parse_view_value(meta.get("views", 0))
                 except Exception as e:
                     row["ig_error"] = str(e)[:100]
+
+            row["tk_view"] = _max_view(row["tk_live_view"], row["tk_history_view"])
+            row["ig_view"] = _max_view(row["ig_live_view"], row["ig_history_view"])
             
             rows.append(row)
         
@@ -1320,12 +1450,15 @@ def api_paste_views():
     """批量 paste 链接，抓取 View"""
     try:
         data = request.get_json()
-        tk_urls = data.get("tk_urls", "").strip()
-        ig_urls = data.get("ig_urls", "").strip()
+        tk_urls = data.get("tk_urls", "")
+        tk_views = data.get("tk_views", "")
+        ig_urls = data.get("ig_urls", "")
+        ig_views = data.get("ig_views", "")
         
-        tk_lines = [l.strip() for l in tk_urls.split("\n") if l.strip()] if tk_urls else []
-        ig_lines = [l.strip() for l in ig_urls.split("\n") if l.strip()] if ig_urls else []
-        total = max(len(tk_lines), len(ig_lines))
+        total = max(
+            len(_split_pasted_column(tk_urls)), len(_split_pasted_column(tk_views)),
+            len(_split_pasted_column(ig_urls)), len(_split_pasted_column(ig_views)),
+        )
         
         if total == 0:
             return jsonify({"error": "请至少粘贴一条链接"}), 400
@@ -1333,7 +1466,11 @@ def api_paste_views():
         task_id = str(uuid.uuid4())[:8]
         _async_tasks[task_id] = {"status": "started"}
         
-        threading.Thread(target=_paste_views_task, args=(task_id, tk_urls, ig_urls), daemon=True).start()
+        threading.Thread(
+            target=_paste_views_task,
+            args=(task_id, tk_urls, tk_views, ig_urls, ig_views),
+            daemon=True,
+        ).start()
         
         return jsonify({"task_id": task_id, "status": "started", "total": total})
     except Exception as e:
@@ -1877,17 +2014,20 @@ def api_calibrate_comment():
     try:
         from engines.comment_analyzer import load_config, classify_single_comment
         import engines.comment_analyzer as ca_mod
-        import copy, datetime
+        import copy
 
         data = request.get_json()
         text = data.get("text", "").strip()
         old_cat = data.get("old_category", "other")
         new_cat = data.get("new_category", "purchase_intent")
+        reason = data.get("reason", "").strip()
 
         if not text:
             return jsonify({"error": "评论原文不能为空"}), 400
         if new_cat not in COMMENT_CAT_NAMES:
             return jsonify({"error": f"无效的目标分类: {new_cat}"}), 400
+        if not reason:
+            return jsonify({"error": "请填写校准理由"}), 400
 
         config = load_config()
 
@@ -1896,15 +2036,35 @@ def api_calibrate_comment():
 
         # Step 1: 诊断
         diagnosis_lines, matched_exclude = _cal_diagnose(text, old_cat, new_cat, config)
+        diagnosis_lines.insert(0, f"人工校准理由：{reason}")
 
         # Step 2: 应用修复
         fix_items, keyword = _cal_apply_fix(text, new_cat, matched_exclude, config)
 
-        if not fix_items:
-            return jsonify({
-                "success": False,
-                "diagnosis": "该评论的现有规则已可正确分类，无需修改配置。\n\n诊断：" + "\n".join(diagnosis_lines),
-            })
+        model_rule = ""
+        if DEEPSEEK_CLIENT:
+            try:
+                prompt = (
+                    f"评论应校准为“{COMMENT_CAT_NAMES[new_cat]}”。请根据评论和人工理由，"
+                    f"输出一句可复用分类规则。\n评论：{text}\n人工理由：{reason}\n只输出规则。"
+                )
+                model_rule = DEEPSEEK_CLIENT.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=180,
+                    temperature=0.2,
+                ).choices[0].message.content.strip()
+            except Exception as e:
+                model_rule = f"模型分析暂不可用：{str(e)[:80]}"
+
+        normalized = re.sub(r"\s+", " ", text.lower()).strip()
+        config.setdefault("calibration_overrides", {})[normalized] = {
+            "category": new_cat,
+            "reason": reason,
+            "model_rule": model_rule,
+            "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        fix_items.append("保存人工校准覆盖规则")
 
         # Step 3: 保存配置
         config["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1930,6 +2090,8 @@ def api_calibrate_comment():
             "diagnosis": "\n".join(diagnosis_lines),
             "fix": fix_items,
             "keyword": keyword,
+            "reason": reason,
+            "model_rule": model_rule,
         })
 
     except Exception as e:

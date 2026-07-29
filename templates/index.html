@@ -133,6 +133,13 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 .analysis-card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:12px}
 .analysis-card h4{font-size:14px;color:#1a1a2e;margin-bottom:8px;display:flex;align-items:center;gap:6px}
 .analysis-card p{font-size:13px;color:#475569;line-height:1.7}
+.single-analysis-lines{display:grid;gap:14px}
+.single-analysis-lines h4{margin:0 0 4px;font-size:13px;color:#1e293b}
+.comments-two-col{column-count:2;column-gap:24px}
+.comments-two-col .comment-item{break-inside:avoid}
+.calibration-box{margin-top:8px;padding:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px}
+.calibration-box input,.calibration-box select{padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px}
+@media(max-width:900px){.comments-two-col{column-count:1}.view-input-grid{grid-template-columns:1fr!important}}
 .meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
 .meta-item{background:#f8fafc;border-radius:8px;padding:12px;text-align:center}
 .meta-item .num{font-size:20px;font-weight:700;color:#4472C4}
@@ -160,10 +167,10 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <aside class="sidebar">
     <h3>📊 分析看板</h3>
     <button class="nav-btn active" id="nav-1" onclick="switchPanel(1)">
-        <span>1</span> 选题 &amp; 评论总盘
+        <span>1</span> 选题 &amp; 评论分析
     </button>
     <button class="nav-btn" id="nav-2" onclick="switchPanel(2)">
-        <span>2</span> 单条视频深入分析
+        <span>2</span> 单视频分析
     </button>
     <button class="nav-btn" id="nav-3" onclick="switchPanel(3)">
         <span>3</span> 数据更新入口
@@ -277,7 +284,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <!-- Panel 2: Single Video Deep Analysis -->
 <div id="panel-2" class="panel hidden">
     <div class="input-panel">
-        <h2 style="margin-bottom:16px">🎬 单条视频深入分析</h2>
+        <h2 style="margin-bottom:16px">🎬 单视频分析</h2>
         <div class="input-row">
             <div class="input-group" style="flex:3">
                 <label>🎥 视频链接 <span style="font-weight:400;color:#64748b;font-size:11px">（TikTok / Instagram 任意视频）</span></label>
@@ -291,6 +298,14 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
                 <label>🌐 语言</label>
                 <select id="video-language-input"><option value="en" selected>英语</option><option value="es">西语</option></select>
             </div>
+            <div class="input-group">
+                <label>💬 抓取评论数</label>
+                <select id="video-comment-count">
+                    <option value="0">0（不抓取）</option><option value="20">20</option>
+                    <option value="50" selected>50</option><option value="100">100</option>
+                    <option value="all">全量</option>
+                </select>
+            </div>
             <button class="btn" id="video-analyze-btn" onclick="analyzeSingleVideo()" style="margin-bottom:0">开始分析</button>
         </div>
         <div class="status" id="video-status"></div>
@@ -302,15 +317,23 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 <div id="panel-3" class="panel hidden">
     <div class="input-panel">
         <h2 style="margin-bottom:16px">📤 批量视频 View 更新</h2>
-        <p style="font-size:13px;color:#64748b;margin-bottom:12px">从 Excel 整列复制粘贴（含空单元格）。TK 列决定总行数，IG 列不足自动在前面补空行。抓取完成后一键复制 View 列粘贴回 Excel。</p>
-        <div style="display:flex;gap:16px;margin-bottom:12px">
-            <div style="flex:1">
+        <p style="font-size:13px;color:#64748b;margin-bottom:12px">从 Excel 整列复制粘贴并保留空行。最终 View = 实时抓取值与历史记录值中的最大值。</p>
+        <div class="view-input-grid" style="display:grid;grid-template-columns:2fr 1fr 2fr 1fr;gap:12px;margin-bottom:12px">
+            <div>
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">🎵 TikTok 链接（从 A 列复制）</label>
                 <textarea id="paste-tk-urls" placeholder="https://www.tiktok.com/@user/video/123&#10;https://www.tiktok.com/@user/video/456" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
             </div>
-            <div style="flex:1">
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">TK 历史 View</label>
+                <textarea id="paste-tk-views" placeholder="4000&#10;8200" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+            </div>
+            <div>
                 <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">📸 Instagram 链接（从 B 列复制）</label>
                 <textarea id="paste-ig-urls" placeholder="https://www.instagram.com/reel/ABC/&#10;https://www.instagram.com/reel/DEF/" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+            </div>
+            <div>
+                <label style="display:block;font-size:12px;font-weight:600;margin-bottom:4px;color:#475569">IG 历史 View</label>
+                <textarea id="paste-ig-views" placeholder="4000&#10;8200" rows="8" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
             </div>
         </div>
         <button class="btn" id="views-paste-btn" onclick="fetchPasteViews()" style="margin-top:8px">🔍 开始抓取 View</button>
@@ -406,6 +429,7 @@ h1{color:#1a1a2e;font-size:24px;margin-bottom:4px}
 let allVideos = [];
 let currentUsername = '';
 let currentPlatform = '';
+let currentLanguage = 'en';
 let commentAnalysisData = null;
 let commentAbortController = null;  // For stopping comment fetch
 let batchAbortController = null;    // For stopping batch analyze
@@ -458,6 +482,7 @@ async function analyzeInfluencer() {
         allVideos = data.videos || [];
         currentUsername = data.username;
         currentPlatform = data.platform;
+        currentLanguage = language;
 
         // 缓存最新 → 直接显示
         if (data.source === 'cache' && allVideos.length) {
@@ -573,9 +598,10 @@ function renderVideoList() {
     else videos.sort((a,b) => (b['发布日期']||'').localeCompare(a['发布日期']||''));
 
     let html = `<p style="font-size:13px;color:#64748b;margin-bottom:8px">显示 ${videos.length} / ${allVideos.length} 条</p>`;
-    html += `<table class="video-table"><thead><tr><th>发布日期</th><th>分类</th><th>标题</th><th>评论</th><th>链接</th><th>命中品牌</th></tr></thead><tbody>`;
+    html += `<table class="video-table"><thead><tr><th>发布日期</th><th>分类</th><th>标题</th><th>评论</th><th>链接</th><th>命中品牌</th><th>在线校准</th></tr></thead><tbody>`;
 
     videos.forEach(v => {
+        const sourceIndex = allVideos.indexOf(v);
         const cat = v['分类'] || '其他';
         const color = CAT_COLORS[cat] || '#F2F2F2';
         const title = (v['标题']||'').substring(0, 120) + ((v['标题']||'').length > 120 ? '...' : '');
@@ -587,7 +613,18 @@ function renderVideoList() {
 <td>${v['评论数']||0}</td>
 <td>${url ? `<a href="${escHtml(url)}" class="video-link" target="_blank" rel="noopener">🔗 打开</a>` : '-'}</td>
 <td>${v['命中品牌']||'-'}</td>
+<td><button class="btn btn-secondary" style="padding:4px 8px;font-size:11px" onclick="toggleTitleCalibration(${sourceIndex})">校准</button></td>
 </tr>`;
+        html += `<tr id="title-cal-${sourceIndex}" class="hidden"><td colspan="7">
+            <div class="calibration-box">
+                <select id="title-cal-cat-${sourceIndex}">
+                    ${Object.keys(CAT_COLORS).map(c => `<option value="${c}" ${c===cat?'selected':''}>${c}</option>`).join('')}
+                </select>
+                <input id="title-cal-reason-${sourceIndex}" style="width:min(520px,60%)" placeholder="必填：为什么应归入这个分类">
+                <button class="btn" style="padding:6px 12px;font-size:12px" onclick="submitTitleCalibration(${sourceIndex})">提交并迭代</button>
+                <span id="title-cal-status-${sourceIndex}" class="text-sm"></span>
+            </div>
+        </td></tr>`;
     });
     html += '</tbody></table>';
     document.getElementById('video-list').innerHTML = html;
@@ -596,6 +633,28 @@ function renderVideoList() {
 function applyFilters() { renderVideoList(); }
 document.getElementById('filter-cat').addEventListener('change', applyFilters);
 document.getElementById('filter-sort').addEventListener('change', applyFilters);
+
+function toggleTitleCalibration(index) {
+    document.getElementById(`title-cal-${index}`)?.classList.toggle('hidden');
+}
+
+async function submitTitleCalibration(index) {
+    const video = allVideos[index];
+    const category = document.getElementById(`title-cal-cat-${index}`).value;
+    const reason = document.getElementById(`title-cal-reason-${index}`).value.trim();
+    const status = document.getElementById(`title-cal-status-${index}`);
+    if (!reason) { status.innerHTML = '<span class="error">请填写校准理由</span>'; return; }
+    status.textContent = '模型正在迭代规则...';
+    const resp = await fetch('/api/calibrate/title', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({title:video['标题'], category, reason, language:currentLanguage})
+    });
+    const data = await resp.json();
+    if (data.error) { status.innerHTML = `<span class="error">${escHtml(data.error)}</span>`; return; }
+    video['分类'] = category;
+    video['分类依据'] = 'Online calibration';
+    renderTopicAndVideos();
+}
 
 // ============ Comment Analysis ============
 async function fetchCommentAnalysis() {
@@ -735,34 +794,62 @@ function renderCommentPart(partData, partNum, title, subtitle) {
     });
     html += '</div>';
 
-    // Comment detail lists (hidden by default)
+    // 评论明细放在评论分布图之后
+    let detailsHtml = '';
     partData.videos.forEach((v, i) => {
         const vid = `p${partNum}-v${i}`;
-        html += `<div class="comment-detail" id="detail-${vid}">`;
+        detailsHtml += `<div class="comment-detail" id="detail-${vid}">`;
         if (v.classified_comments && v.classified_comments.length > 0) {
-            html += `<p class="text-sm mb-12">📝 ${v.classified_comments.length} 条分类评论 (共抓取 ${v.total_raw_comments} 条)</p>`;
-            v.classified_comments.forEach(c => {
+            detailsHtml += `<p class="text-sm mb-12">📝 ${v.classified_comments.length} 条分类评论 (共抓取 ${v.total_raw_comments} 条)</p>`;
+            v.classified_comments.forEach((c, ci) => {
                 const [catName, catCls] = COMMENT_CAT_INFO[c.category_key] || [c.category,''];
                 const subLabel = c.subtype_zh ? ` [${c.subtype_zh}]` : '';
-                html += `<div class="comment-item">
+                const calId = `${vid}-${ci}`;
+                detailsHtml += `<div class="comment-item">
                     <span class="comment-cat ${catCls}">${catName}${subLabel}</span>
                     👍 ${c.likes} @${escHtml(c.username||'匿名')} — ${escHtml((c.text||'').substring(0,120))}
+                    <button class="btn btn-secondary" style="padding:2px 7px;font-size:10px;float:right" onclick="document.getElementById('comment-cal-${calId}').classList.toggle('hidden')">校准</button>
+                    <div class="calibration-box hidden" id="comment-cal-${calId}">
+                        <select id="comment-cal-cat-${calId}">
+                            ${Object.entries(COMMENT_CAT_INFO).map(([k, info]) => `<option value="${k}" ${k===c.category_key?'selected':''}>${info[0]}</option>`).join('')}
+                        </select>
+                        <input id="comment-cal-reason-${calId}" style="width:min(480px,55%)" placeholder="必填：为什么应归入这个分类">
+                        <button class="btn" style="padding:5px 9px;font-size:11px" onclick='submitCommentCalibration(${JSON.stringify(c.text||"")},${JSON.stringify(c.category_key)}, "${calId}")'>提交并迭代</button>
+                        <span class="text-sm" id="comment-cal-status-${calId}"></span>
+                    </div>
                 </div>`;
             });
         } else if (v.fetch_error) {
-            html += `<p class="error-box">抓取失败: ${v.fetch_error}</p>`;
+            detailsHtml += `<p class="error-box">抓取失败: ${v.fetch_error}</p>`;
         } else {
-            html += '<p class="text-sm">无有效评论</p>';
+            detailsHtml += '<p class="text-sm">无有效评论</p>';
         }
-        html += '</div>';
+        detailsHtml += '</div>';
     });
 
     // Aggregate distribution bar chart
-    html += '<h3 style="margin-top:20px">📊 汇总评论分类分布</h3>';
+    html += '<h3 style="margin-top:20px">📊 评论分布图</h3>';
     html += renderDistBarChart(partData.aggregate_distribution, partData.total_classified_comments);
+    html += '<h3 style="margin-top:20px">📝 评论明细 &amp; 在线校准</h3>' + detailsHtml;
 
     html += '</div></div>';
     return html;
+}
+
+async function submitCommentCalibration(text, oldCategory, id) {
+    const newCategory = document.getElementById(`comment-cal-cat-${id}`).value;
+    const reason = document.getElementById(`comment-cal-reason-${id}`).value.trim();
+    const status = document.getElementById(`comment-cal-status-${id}`);
+    if (!reason) { status.innerHTML = '<span class="error">请填写校准理由</span>'; return; }
+    status.textContent = '模型正在迭代规则...';
+    const resp = await fetch('/api/batch/calibrate_comment', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text, old_category:oldCategory, new_category:newCategory, reason})
+    });
+    const data = await resp.json();
+    status.innerHTML = data.error
+        ? `<span class="error">${escHtml(data.error)}</span>`
+        : `<span class="ok">${data.success ? '校准完成' : escHtml(data.diagnosis || '未修改')}</span>`;
 }
 
 function renderDistBarChart(distribution, total) {
@@ -923,7 +1010,10 @@ async function batchAnalyze() {
     stopBtn.disabled = false;
 
     try {
-        let allVideos = [];
+        allVideos = [];
+        currentPlatform = platform;
+        currentLanguage = language;
+        currentUsername = inputs.length === 1 ? inputs[0].replace('@','') : `${inputs.length}个达人`;
 
         // Step 1: Check cache for all
         const checkResp = await fetch('/api/batch/analyze', {
@@ -1094,6 +1184,7 @@ async function batchAnalyze() {
             renderTopicAndVideos();
             document.getElementById('results-area').classList.remove('hidden');
             status.innerHTML = `<span class="ok">✅ 批量分析完成: ${inputs.length} 个达人, ${allVideos.length} 条视频</span>`;
+            await fetchCommentAnalysis();
         } else {
             status.innerHTML = '<span class="error">所有达人均无缓存数据，请先单个抓取</span>';
         }
@@ -1222,6 +1313,7 @@ async function analyzeSingleVideo() {
     const url = document.getElementById('video-url-input').value.trim();
     const platform = document.getElementById('video-platform-input').value;
     const language = document.getElementById('video-language-input').value;
+    const commentCount = document.getElementById('video-comment-count').value;
     const status = document.getElementById('video-status');
     const btn = document.getElementById('video-analyze-btn');
     const resultsArea = document.getElementById('video-results-area');
@@ -1239,7 +1331,7 @@ async function analyzeSingleVideo() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             signal: videoAbortController.signal,
-            body: JSON.stringify({url, platform, language})
+            body: JSON.stringify({url, platform, language, comment_count:commentCount})
         });
         const initData = await resp.json();
         if (initData.error) { renderError('video-status', initData.error, 'ScrapeCreators'); btn.disabled = false; return; }
@@ -1294,6 +1386,7 @@ function renderSingleVideoResults(result) {
     const analysis = result.analysis || {};
     const comments = result.comments || [];
     const transcript = result.transcript || '（未获取到口播原文）';
+    const transcriptZh = result.transcript_zh || '（未生成中文翻译）';
 
     // Format numbers
     const fmt = n => n === null || n === undefined ? '-' : Number(n).toLocaleString();
@@ -1301,7 +1394,7 @@ function renderSingleVideoResults(result) {
     // Comments HTML
     let commentsHtml = '';
     if (comments.length) {
-        commentsHtml = `<p style="font-size:13px;color:#64748b;margin-bottom:8px">共 ${comments.length} 条有效评论</p>`;
+        commentsHtml = `<p style="font-size:13px;color:#64748b;margin-bottom:8px">共 ${comments.length} 条有效评论</p><div class="comments-two-col">`;
         comments.forEach(c => {
             commentsHtml += `<div class="comment-item" style="padding:8px 0;border-bottom:1px dashed #e2e8f0">
                 <span style="font-weight:600">@${escHtml(c.username || '匿名')}</span>
@@ -1309,8 +1402,11 @@ function renderSingleVideoResults(result) {
                 <p style="margin-top:4px">${escHtml(c.text || '')}</p>
             </div>`;
         });
+        commentsHtml += '</div>';
     } else {
-        commentsHtml = '<p class="text-sm">未抓取到有效评论</p>';
+        commentsHtml = result.requested_comment_count === 0
+            ? '<p class="text-sm">本次选择 0 条，未抓取评论。</p>'
+            : '<p class="text-sm">未抓取到有效评论</p>';
     }
 
     container.innerHTML = `
@@ -1331,29 +1427,19 @@ function renderSingleVideoResults(result) {
         <div class="section">
             <h2>📝 口播原文</h2>
             <div class="transcript-box">${escHtml(transcript)}</div>
+            <h3 style="margin-top:18px">中文全文翻译</h3>
+            <div class="transcript-box">${escHtml(transcriptZh)}</div>
         </div>
 
         <div class="section">
             <h2>🧠 内容拆解（DeepSeek）</h2>
             <div class="analysis-card">
-                <h4>🎯 HOOK（前 3 秒）</h4>
-                <p>${escHtml(analysis.hook || '暂无分析')}</p>
-            </div>
-            <div class="analysis-card">
-                <h4>📝 中段内容</h4>
-                <p>${escHtml(analysis.middle || '暂无分析')}</p>
-            </div>
-            <div class="analysis-card">
-                <h4>📢 CTA / 结尾引导</h4>
-                <p>${escHtml(analysis.cta || '暂无分析')}</p>
-            </div>
-            <div class="analysis-card">
-                <h4>💡 一句话总结</h4>
-                <p>${escHtml(analysis.content_summary || '暂无分析')}</p>
-            </div>
-            <div class="analysis-card">
-                <h4>👥 观众洞察</h4>
-                <p>${escHtml(analysis.audience_insight || '暂无分析')}</p>
+                <div class="single-analysis-lines">
+                    <div><h4>🎯 Hook（前 3 秒）</h4><p>${escHtml(analysis.hook || '暂无分析')}</p></div>
+                    <div><h4>📝 中段内容</h4><p>${escHtml(analysis.middle || '暂无分析')}</p></div>
+                    <div><h4>📢 CTA / 结尾引导</h4><p>${escHtml(analysis.cta || '暂无分析')}</p></div>
+                    <div><h4>💡 一句话总结</h4><p>${escHtml(analysis.content_summary || '暂无分析')}</p></div>
+                </div>
             </div>
             <div class="analysis-card">
                 <h4>🔧 优化建议</h4>
@@ -1362,7 +1448,11 @@ function renderSingleVideoResults(result) {
         </div>
 
         <div class="section">
-            <h2>💬 全部评论（最多 50 条）</h2>
+            <h2>💬 评论</h2>
+            <div class="analysis-card">
+                <h4>👥 观众洞察</h4>
+                <p>${escHtml(analysis.audience_insight || (result.requested_comment_count === 0 ? '本次未抓取评论，无法生成观众洞察。' : '暂无分析'))}</p>
+            </div>
             <div>${commentsHtml}</div>
         </div>
     `;
@@ -1376,11 +1466,13 @@ async function fetchPasteViews() {
     const btn = document.getElementById('views-paste-btn');
     const resultsArea = document.getElementById('views-results-area');
 
-    const tkRaw = document.getElementById('paste-tk-urls').value.trim();
-    const igRaw = document.getElementById('paste-ig-urls').value.trim();
+    const tkRaw = document.getElementById('paste-tk-urls').value;
+    const tkViewsRaw = document.getElementById('paste-tk-views').value;
+    const igRaw = document.getElementById('paste-ig-urls').value;
+    const igViewsRaw = document.getElementById('paste-ig-views').value;
 
-    if (!tkRaw && !igRaw) {
-        status.innerHTML = '<span class="error">请至少在一个框中粘贴链接</span>';
+    if (!tkRaw && !igRaw && !tkViewsRaw.trim() && !igViewsRaw.trim()) {
+        status.innerHTML = '<span class="error">请至少粘贴一列链接或历史 View</span>';
         return;
     }
 
@@ -1394,7 +1486,7 @@ async function fetchPasteViews() {
         const resp = await fetch('/api/videos/views/paste', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tk_urls: tkRaw, ig_urls: igRaw }),
+            body: JSON.stringify({ tk_urls: tkRaw, tk_views:tkViewsRaw, ig_urls: igRaw, ig_views:igViewsRaw }),
             signal: viewsAbortController.signal
         });
         const initData = await resp.json();
@@ -1452,7 +1544,7 @@ function renderPasteViewsResults(result) {
 
     let html = `<div class="section"><h2>📊 View 数据（按行对齐）</h2>
         <p style="font-size:13px;color:#64748b;margin-bottom:8px">共 ${rows.length} 行。点击下方按钮一键复制整列，粘贴回 Excel 的 C 列 / D 列。</p>
-        <table class="video-table"><thead><tr><th>#</th><th>TK View</th><th>IG View</th><th>状态</th></tr></thead><tbody>`;
+        <table class="video-table"><thead><tr><th>#</th><th>TK 实时</th><th>TK 历史</th><th>TK 最终</th><th>IG 实时</th><th>IG 历史</th><th>IG 最终</th><th>状态</th></tr></thead><tbody>`;
 
     rows.forEach((row, i) => {
         const tkViews = row.tk_view;
@@ -1477,8 +1569,12 @@ function renderPasteViewsResults(result) {
 
         html += `<tr>
             <td>${i + 1}</td>
-            <td>${tkDisplay}</td>
-            <td>${igDisplay}</td>
+            <td>${fmt(row.tk_live_view)}</td>
+            <td>${fmt(row.tk_history_view)}</td>
+            <td><strong>${tkDisplay}</strong></td>
+            <td>${fmt(row.ig_live_view)}</td>
+            <td>${fmt(row.ig_history_view)}</td>
+            <td><strong>${igDisplay}</strong></td>
             <td>${statusText}</td>
         </tr>`;
     });
