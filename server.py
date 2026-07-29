@@ -608,7 +608,16 @@ def _rotate_sc_key():
         if len(SC_API_KEYS) <= 1:
             return False
         _sc_key_index = (_sc_key_index + 1) % len(SC_API_KEYS)
-        return True
+    return True
+
+
+def _mask_key(key):
+    """遮罩 API Key，供状态接口安全展示。"""
+    if not key:
+        return "未设置"
+    if len(key) <= 8:
+        return key[:2] + "***"
+    return key[:4] + "***" + key[-4:]
 
 def _sc_request(method, url, **kwargs):
     """带自动轮换的 ScrapeCreators 请求：402 时自动切下一个 key"""

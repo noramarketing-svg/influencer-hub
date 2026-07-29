@@ -1663,7 +1663,9 @@ async function loadCredits() {
         const sc = credits.scrapecreators;
         const ap = credits.apify;
         const ds = credits.deepseek;
-        if (sc && sc.keys) {
+        if (sc && sc.error) {
+            document.getElementById('sc-credits').textContent = '⚠️ 状态检查失败，请稍后重试';
+        } else if (sc && sc.keys) {
             const parts = sc.keys.map(k => 
                 `${k.masked}: ${k.status === 'active' ? '✅ 可用' :
                     k.status === 'exhausted' ? '💰 已用完' :
